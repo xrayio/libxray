@@ -1,0 +1,72 @@
+/*
+ * xray.hpp
+ *
+ *  Created on: 25 Aug 2017
+ *      Author: gregory
+ */
+
+#ifndef SRC_XRAY_HPP_
+#define SRC_XRAY_HPP_
+
+#include <string>
+#include <memory>
+#include <thread>
+
+#include "zmq.h"
+#include "zmq.hpp"
+
+#include "xray.h"
+
+using namespace std;
+
+typedef vector<vector<string>> ResultSet;
+class XPathNode;
+
+class XNode {
+	shared_ptr<XPathNode> root_xpath = make_shared<XPathNode>("/", 0);
+	unordered_map <void *, string> xobj_to_path;
+
+	public:
+		void xadd(void *xobj,
+				  int n_rows,
+				  const string &xpath_str,
+				  const string &xtype_str,
+				  xray_iterator iterator_cb=nullptr);
+		shared_ptr<ResultSet> xdump(const string &xtype_str);
+		void destroy();
+};
+
+class XClient {
+	zmq::context_t *ctx = nullptr;
+	zmq::socket_t *res = nullptr;
+	string node_id;
+	string conn;
+	bool debug = false;
+	unordered_map<string, string> cfg;
+
+	void destroy_socket();
+	void rx(string &rs, string &req_id, uint64_t &ts, string &widget_id);
+	void _tx(ResultSet &msg, const string &req_id, uint64_t ts, int avg_ms, const string &widget_id="");
+	void tx(ResultSet &rs, const string &req_id="", uint64_t ts=0, int avg_ms=0, const string &widget_id="");
+	void tx(string &msg, const string &req_id="", uint64_t ts=0, int avg_ms=0);
+	void _start();
+	void get_cfg(const string &api_key);
+
+public:
+	thread *xclient_thread = nullptr;
+	/* for tests */
+	int rx_timeout = 30000;
+
+	XNode xnode;
+
+	XClient(const string &api_key);
+	~XClient();
+	void init_socket();
+	// TODO: implement thread stop
+	shared_ptr<ResultSet> handle_query(const string &query);
+	void start();
+};
+
+
+
+#endif /* SRC_XRAY_HPP_ */
