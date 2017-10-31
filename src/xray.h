@@ -42,7 +42,12 @@ extern "C"
 
 	/* UTILS */
 	/* adding two rows of same type */
-	int xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd);
+	int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd);
+
+
+	#define xray_add_bytype(container, row_dst, row_toadd) \
+		_xray_add_bytype(#container, row_dst, row_toadd)
+
 	void *_xray_row_allocate(int size);
 	#define xray_row_allocate(container) \
 		_xray_row_allocate(sizeof(container))
