@@ -395,41 +395,14 @@ class XPathNode {
 		XPathNode& parse_path_str(const string &xpath_str);
 };
 
-static void format_row(shared_ptr<ResultSet> &rs, void *row_ptr, shared_ptr<XType> xtype);
-
-static void xdump_xobj(shared_ptr<ResultSet> &rs,
-					   shared_ptr<XType> xtype,
-					   xray_iterator iterator_cb,
-					   int n_rows,
-					   void *xobj)
-{
-	if(iterator_cb) {
-		uintptr_t state = 0;
-		void *row_ptr = iterator_cb(xobj, &state);
-		while(row_ptr != nullptr)
-		{
-			format_row(rs, row_ptr, xtype);
-			row_ptr = iterator_cb(xobj, &state);
-		}
-	}
-
-	int row_offset = 0;
-	for(auto idx : range(0, n_rows)) {
-		void *row_ptr = (uint8_t *)xobj + row_offset;
-		format_row(rs, row_ptr, xtype);
-		row_offset += (xtype->size);
-	}
-}
-
-static void format_row(shared_ptr<ResultSet> &rs, void *row_ptr, shared_ptr<XType> xtype) {
-	vector<string> row;
+static bool format_row(vector<string> &row, void *row_ptr, shared_ptr<XType> xtype) {
 	bool is_empty_row = true;
 
 	for(auto &slot_entry: xtype->slots) {
 		shared_ptr<XSlot> slot = slot_entry.second;
 		void *slot_ptr = (uint8_t *)row_ptr + slot->offset;
 		if(is_complex_slot(slot)) {
-			xdump_xobj(rs, slot->type, nullptr, 1, slot_ptr);
+			is_empty_row &= format_row(row, slot_ptr, slot->type);
 			continue;
 		}
 		int slot_size = slot->type->size;
@@ -443,8 +416,9 @@ static void format_row(shared_ptr<ResultSet> &rs, void *row_ptr, shared_ptr<XTyp
 			uintptr_t slot_uintptr = get_int_value_of_slot(slot_size, slot_ptr, slot->is_refernce);
 			formatted = string_sprintf(slot->type->fmt.c_str(),  slot_uintptr);
 		}
-		if(formatted != "0" and !(slot->flags & XRAY_FLAG_CONST))
+		if(formatted != "0" and !(slot->flags & XRAY_FLAG_CONST)) {
 			is_empty_row = false;
+		}
 		row.push_back(formatted);
 	}
 
@@ -1128,7 +1102,7 @@ void xray_dump(const char *path) {
 	print_rs(*rs);
 }
 
-int xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
+int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
 {
 	auto xtype = types.find(type_name);
 	string str_type_name = type_name;
