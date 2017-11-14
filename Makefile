@@ -51,8 +51,8 @@ DEBUG_SANITIZE:=-fsanitize=address -fno-omit-frame-pointer
 SYS_INC:=-I/usr/include -I/usr/local/include
 SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
 
-test-api: libxray-debug
-	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -lstdc++ -lxray -lzmq -o ${INSTALL_DIR}/test-c-api ${SRC_DIR}/test-c-api.c
+test-api: libxray
+	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -o ${INSTALL_DIR}/test-c-api ${SRC_DIR}/test-c-api.c -lxray -lstdc++ -lzmq
 	./dist/test-c-api
 
 libxray:
