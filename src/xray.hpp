@@ -11,9 +11,10 @@
 #include <string>
 #include <memory>
 #include <thread>
+#include <list>
 
-#include "zmq.h"
-#include "zmq.hpp"
+#include <zmq.h>
+#include <zmq.hpp>
 
 #include "xray.h"
 
@@ -27,6 +28,8 @@ class XNode {
 	unordered_map <void *, string> xobj_to_path;
 
 	public:
+		list<weak_ptr<XPathNode>> expire_pnodes;
+
 		void xadd(void *xobj,
 				  int n_rows,
 				  const string &xpath_str,
@@ -43,12 +46,15 @@ class XClient {
 	string conn;
 	bool debug = false;
 	unordered_map<string, string> cfg;
+	uint32_t time;
+	uint32_t expire_ts;
 
 	void destroy_socket();
 	void rx(string &rs, string &req_id, uint64_t &ts, string &widget_id);
 	void _tx(ResultSet &msg, const string &req_id, uint64_t ts, int avg_ms, const string &widget_id="");
 	void tx(ResultSet &rs, const string &req_id="", uint64_t ts=0, int avg_ms=0, const string &widget_id="");
 	void tx(string &msg, const string &req_id="", uint64_t ts=0, int avg_ms=0);
+	void expire_captures();
 	void _start();
 	void get_cfg(const string &api_key);
 

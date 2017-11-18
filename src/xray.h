@@ -16,10 +16,12 @@ extern "C"
 {
 #endif
 	/* defines */
-	#define XRAY_MAX_SLOT_STR_SIZE (64)
-	#define XRAY_STATE_MAX_SIZE (32)
+	#define XRAY_MAX_SLOT_STR_SIZE 	(64)
+	#define XRAY_STATE_MAX_SIZE 	(32)
 
 	#define XRAY_FLAG_CONST (1 << 0)
+	#define XRAY_FLAG_RATE  (1 << 1)
+	#define XRAY_FLAG_PK	(1 << 2)
 
 	#define member_size(type, member) sizeof(((type *)0)->member)
 
@@ -27,7 +29,13 @@ extern "C"
 	typedef char * c_string_t;
 	typedef char ** c_p_string_t;
 
-	typedef int64_t (*xray_vslot_fmt_cb)(void *row);
+	typedef struct {
+		void *data;
+		uint32_t timestamp;
+		void *slot;
+	} xray_vslot_args_t;
+
+	typedef int64_t (*xray_vslot_fmt_cb)(void *row, xray_vslot_args_t *vslot_args);
 	typedef int (*xray_fmt_type_cb)(void *slot, char *out_str);
 	typedef void * (*xray_iterator)(void *start, uint8_t *state, void *mem);
 
@@ -41,7 +49,7 @@ extern "C"
 	//TODO: checl sizeof(slot) == sizeof(slot_type)
 
 	/* UTILS */
-	/* adding two rows of same type */
+	/* Adding two rows of same type */
 	int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd);
 
 

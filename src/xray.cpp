@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <sys/time.h>
 
 #include "ordered_map.h"
 #define ZMQ_CPP11
@@ -38,12 +39,16 @@ class XType;
 class XSlot;
 
 unordered_map <string, shared_ptr<XType> > types;
+typedef pair<vector<char>, uint32_t> capture_t;
 
 /**
  * Static functions, HELPERS
  */
 
 #define BREAKPOINT	__asm__("int $3")
+
+#define EXPIRE_CAPTURE_CHECK_SEC (10)
+#define EXPIRE_CAPTURE_SEC  	 (4)
 
 template<class T>
 class Stats {
@@ -221,13 +226,19 @@ class VSlot{
 	public:
 		string name;
 		xray_vslot_fmt_cb fmt_cb;
+		xray_vslot_args_t args;
+		bool is_args = false;
 	public:
-		VSlot(const string &name, xray_vslot_fmt_cb fmt_cb);
+		VSlot(const string &name, xray_vslot_fmt_cb fmt_cb, xray_vslot_args_t *vslot_args);
 };
 
-VSlot::VSlot(const string &name, xray_vslot_fmt_cb fmt_cb) {
+VSlot::VSlot(const string &name, xray_vslot_fmt_cb fmt_cb, xray_vslot_args_t *vslot_args) {
 	this->name = name;
 	this->fmt_cb = fmt_cb;
+	if(vslot_args) {
+		this->args = *vslot_args;
+		this->is_args = true;
+	}
 }
 
 
@@ -235,24 +246,18 @@ VSlot::VSlot(const string &name, xray_vslot_fmt_cb fmt_cb) {
  * XSLOT
  */
 
-class XSlot{
-	public:
-		string name;
-		int offset;
-		bool is_pointer;
-		bool is_refernce;
-		int arr_size;
-		shared_ptr<XType> type;
-		int flags;
+class XSlot {
+public:
+	string name;
+	int offset;
+	bool is_pointer;
+	bool is_refernce;
+	int arr_size;
+	shared_ptr<XType> type;
+	int flags;
 
-	public:
-		XSlot(const string &name,
-			  int offset,
-			  bool is_pointer,
-			  bool is_reference,
-			  int arr_size,
-			  shared_ptr<XType> type,
-			  int flags);
+	XSlot(const string &name, int offset, bool is_pointer, bool is_reference,
+			int arr_size, shared_ptr<XType> type, int flags);
 };
 
 XSlot::XSlot(const string &name,
@@ -315,10 +320,13 @@ class XType {
 		tsl::ordered_map<string, shared_ptr<XSlot>> slots;
 		tsl::ordered_map<string, shared_ptr<VSlot>> vslots;
 		string name;
+		shared_ptr<XSlot> pk = nullptr;
+		bool capture_needed = false;
+
 
 		XType(const string &name, int size, const string &fmt="", xray_fmt_type_cb fmt_cb=nullptr);
 		void add_slot(const string &name, int offset, int size, const string &type, bool is_pointer=false, int array_size=0, int flags=0);
-		void add_vslot(const string &name, xray_vslot_fmt_cb fmt_cb);
+		void add_vslot(const string &name, xray_vslot_fmt_cb fmt_cb, xray_vslot_args_t *args);
 };
 
 XType::XType(const string &name, int size, const string &fmt, xray_fmt_type_cb fmt_cb) {
@@ -328,27 +336,79 @@ XType::XType(const string &name, int size, const string &fmt, xray_fmt_type_cb f
 	this->fmt_cb = fmt_cb;
 }
 
-void XType::add_slot(const string &name,
-		  	  	  	 int offset,
-					 int size,
-					 const string &type,
-					 bool is_pointer,
-					 int array_size,
-					 int flags) {
-	auto found = types.find(type);
-	if(found == types.end())
-		throw invalid_argument("cannot find type '" + type + "'");
-	if(size != found->second->size && found->second->fmt_cb == NULL)
-		throw invalid_argument("size of slot, isn't same as of xtype.");
-	slots[name] = make_shared<XSlot>(name, offset, is_pointer, false, 0, found->second, flags);
+static uint32_t get_current_timestamp() {
+	struct timespec tm;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &tm);
+
+	uint64_t miliseconds = tm.tv_sec * 1000 + tm.tv_nsec / 1000 / 1000;
+	return miliseconds;
 }
 
-void XType::add_vslot(const string &name, xray_vslot_fmt_cb fmt_cb) {
-	vslots[name] = make_shared<VSlot>(name, fmt_cb);
+static uint32_t timestamp_diff_in_sec(uint32_t ts_a, uint32_t ts_b) {
+	return (ts_a - ts_b) / 1000;
+}
+
+int64_t calc_slot_rate(void *row, xray_vslot_args_t *args) {
+	uint64_t curr = 0;
+	uint64_t captured = 0;
+
+	shared_ptr<XSlot> slot = *static_cast<shared_ptr<XSlot> *>(args->slot);
+
+	void *slot_ptr = (char *)row + slot->offset;
+	void *captured_slot = (char *)args->data + slot->offset;
+
+	uint32_t curr_ts = get_current_timestamp();
+	uint32_t diff_ts = curr_ts - args->timestamp;
+	memcpy(&curr, slot_ptr, slot->type->size);
+	memcpy(&captured, captured_slot, slot->type->size);
+
+	uint64_t diff = curr - captured;
+	if(diff_ts == 0)
+		return 0;
+	return diff * 1000 /*miliseconds*/ / diff_ts ;
 }
 
 static bool is_complex_slot(shared_ptr<XSlot> slot) {
 	return slot->type->slots.size() > 0;
+}
+
+void XType::add_slot(const string &name,
+		  	  	  	 int offset,
+					 int size,
+					 const string &slot_type_str,
+					 bool is_pointer,
+					 int array_size,
+					 int flags)
+{
+	auto found_slot_type = types.find(slot_type_str);
+	if(found_slot_type == types.end())
+		throw invalid_argument("cannot find type '" + slot_type_str + "'");
+	if(size != found_slot_type->second->size && found_slot_type->second->fmt_cb == NULL)
+		throw invalid_argument("size of slot, isn't same as of xtype.");
+
+	slots[name] = make_shared<XSlot>(name, offset, is_pointer, false, 0, found_slot_type->second, flags);
+
+	if(flags & XRAY_FLAG_PK) {
+		if(is_complex_slot(slots[name]))
+			throw invalid_argument("cannot set pk on complex slot");
+
+		pk = slots[name];
+	}
+
+	if(flags & XRAY_FLAG_RATE) {
+		capture_needed = true;
+
+		string rate_name = name + "-" + "rate";
+		xray_vslot_args_t args = {0};
+		args.slot = (void *)&slots[name];
+
+		add_vslot(rate_name, calc_slot_rate, &args);
+	}
+
+}
+
+void XType::add_vslot(const string &name, xray_vslot_fmt_cb fmt_cb, xray_vslot_args_t *args) {
+	vslots[name] = make_shared<VSlot>(name, fmt_cb, args);
 }
 
 static void xdump_slots(vector<string> &header_raw,
@@ -372,59 +432,94 @@ static void xdump_slots(vector<string> &header_raw,
  */
 class XPathNode {
 	public:
-		void *xobj;
+		void *xobj = nullptr;
 		tsl::ordered_map <string, shared_ptr<XPathNode>> sons;
-		shared_ptr<XType> xtype;
+		shared_ptr<XType> xtype = nullptr;
+		XNode *xnode;
+		weak_ptr<XPathNode> self;
 
-		/*user configs*/
-		xray_iterator iterator_cb;
-		int n_rows;
+		uint32_t last_capture_ts = 0;
+
+		/* user config */
+		xray_iterator iterator_cb = nullptr;
+		int n_rows = 0;
 
 		XPathNode(const string &xpath_str,
 				  int n_rows,
-				  void *xobj=nullptr,
-				  shared_ptr<XType> xtype=nullptr,
-				  shared_ptr<XPathNode> father=nullptr);
+				  XNode *xnode = nullptr);
+
 		vector<string> dump_son_names();
 		shared_ptr<ResultSet> xdump();
 		void xdump_dirs(shared_ptr<ResultSet> &rs, const string path="/");
+		void clear_captures();
+
 	private:
+		/* rate calculation */
+		unordered_map<string, capture_t> captures;
+
+
 		string name;
 		weak_ptr<XPathNode> father_node;
 
 		XPathNode& parse_path_str(const string &xpath_str);
+		void xdump_xobj(shared_ptr<ResultSet> &rs);
+		bool format_row(vector<string> &row, void *row_ptr, capture_t *capture, shared_ptr<XType> xtype);
+		string format_slot(shared_ptr<XSlot> &slot, void *slot_ptr);
+		void handle_row(shared_ptr<ResultSet> &rs, void *row_ptr);
 };
 
-static bool format_row(vector<string> &row, void *row_ptr, shared_ptr<XType> xtype) {
+void XPathNode::clear_captures() {
+	last_capture_ts = 0;
+	captures.clear();
+}
+
+string XPathNode::format_slot(shared_ptr<XSlot> &slot, void *slot_ptr) {
+	int slot_size = slot->type->size;
+	string formatted(XRAY_MAX_SLOT_STR_SIZE * 2, 0);
+	if(slot->type->fmt_cb) {
+		int len = slot->type->fmt_cb(slot_ptr, &formatted[0]);
+		formatted.resize(len);
+		if(len > XRAY_MAX_SLOT_STR_SIZE)
+			throw fmt_cb_result_too_big();
+	} else {
+		uintptr_t slot_uintptr = get_int_value_of_slot(slot_size, slot_ptr, slot->is_refernce);
+		formatted = string_sprintf(slot->type->fmt.c_str(),  slot_uintptr);
+	}
+	return move(formatted);
+}
+
+bool XPathNode::format_row(vector<string> &row, void *row_ptr, capture_t *cap, shared_ptr<XType> xtype) {
 	bool is_empty_row = true;
 
 	for(auto &slot_entry: xtype->slots) {
 		shared_ptr<XSlot> slot = slot_entry.second;
 		void *slot_ptr = (uint8_t *)row_ptr + slot->offset;
+
 		if(is_complex_slot(slot)) {
-			is_empty_row &= format_row(row, slot_ptr, slot->type);
+			is_empty_row &= format_row(row, slot_ptr, nullptr, slot->type);
 			continue;
 		}
-		int slot_size = slot->type->size;
-		string formatted(XRAY_MAX_SLOT_STR_SIZE * 2, 0);
-		if(slot->type->fmt_cb) {
-			int len = slot->type->fmt_cb(slot_ptr, &formatted[0]);
-			formatted.resize(len);
-			if(len > XRAY_MAX_SLOT_STR_SIZE)
-				throw fmt_cb_result_too_big();
-		} else {
-			uintptr_t slot_uintptr = get_int_value_of_slot(slot_size, slot_ptr, slot->is_refernce);
-			formatted = string_sprintf(slot->type->fmt.c_str(),  slot_uintptr);
-		}
+
+		string formatted = format_slot(slot, slot_ptr);
 		if(formatted != "0" and !(slot->flags & XRAY_FLAG_CONST)) {
 			is_empty_row = false;
 		}
 		row.push_back(formatted);
 	}
 
-	for(auto &vslot: xtype->vslots) {
-		// TODO: support simple formating, needed support for more complicated
-		int64_t vslot_out = vslot.second->fmt_cb(row_ptr);
+	for(auto &iterator: xtype->vslots) {
+		void *slot_capture = nullptr;
+		xray_vslot_args_t *args = nullptr;
+		auto vslot = iterator.second;
+
+		if(vslot->is_args && cap)
+		{
+			args = &vslot->args;
+			args->data = cap->first.data();
+			args->timestamp = cap->second;
+		}
+
+		int64_t vslot_out = vslot->fmt_cb(row_ptr, args);
 		string formatted = string_sprintf("%" PRIi64,  vslot_out);
 		if(formatted != "0")
 			is_empty_row = false;
@@ -434,12 +529,42 @@ static bool format_row(vector<string> &row, void *row_ptr, shared_ptr<XType> xty
 	return is_empty_row;
 }
 
-static void xdump_xobj(shared_ptr<ResultSet> &rs,
-					   shared_ptr<XType> xtype,
-					   xray_iterator iterator_cb,
-					   int n_rows,
-					   void *xobj)
+void XPathNode::handle_row(shared_ptr<ResultSet> &rs, void *row_ptr) {
+	auto row = vector<string>{};
+	capture_t *cap = nullptr;
+	string pk;
+
+	if(xtype->capture_needed) {
+		void *slot_ptr = (char *)row_ptr + xtype->pk->offset;
+		string pk = format_slot(xtype->pk, slot_ptr);
+		cap = &captures[pk];
+		if(cap->second == 0) {
+			cap->first.resize(xtype->size);
+			memcpy(cap->first.data(), row_ptr, xtype->size);
+			cap->second = get_current_timestamp();
+		}
+	}
+
+	if(format_row(row, row_ptr, cap, xtype) == false)
+		rs->push_back(move(row));
+
+	if(xtype->capture_needed) {
+		memcpy(cap->first.data(), row_ptr, xtype->size);
+		cap->second = get_current_timestamp();
+	}
+
+}
+
+void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 {
+	if(xtype->capture_needed) {
+		if(last_capture_ts == 0) {
+			xnode->expire_pnodes.push_back(self);
+		}
+		last_capture_ts = get_current_timestamp();
+
+	}
+
 	if(iterator_cb) {
 		uint8_t state[XRAY_STATE_MAX_SIZE] = {0};
 		char mem[xtype->size];
@@ -447,9 +572,7 @@ static void xdump_xobj(shared_ptr<ResultSet> &rs,
 		void *row_ptr = iterator_cb(xobj, state, mem);
 		while(row_ptr != nullptr)
 		{
-			auto row = vector<string>{};
-			if(format_row(row, row_ptr, xtype) == false)
-				rs->push_back(move(row));
+			handle_row(rs, row_ptr);
 			row_ptr = iterator_cb(xobj, state, mem);
 		}
 	}
@@ -457,9 +580,7 @@ static void xdump_xobj(shared_ptr<ResultSet> &rs,
 	int row_offset = 0;
 	for(auto idx : range(0, n_rows)) {
 		void *row_ptr = (uint8_t *)xobj + row_offset;
-		auto row = vector<string>{};
-		if(format_row(row, row_ptr, xtype) == false)
-			rs->push_back(move(row));
+		handle_row(rs, row_ptr);
 		row_offset += (xtype->size);
 	}
 }
@@ -478,7 +599,7 @@ shared_ptr<ResultSet> XPathNode::xdump() {
 	if(xobj) {
 		rs->push_back(vector<string>{});
 		xdump_slots(rs->front(), xtype->slots, xtype->vslots);
-		xdump_xobj(rs, xtype, iterator_cb, n_rows, xobj);
+		xdump_xobj(rs);
 	} else {
 		rs->push_back(vector<string>{"dir"});
 		xdump_dirs(rs);
@@ -488,14 +609,10 @@ shared_ptr<ResultSet> XPathNode::xdump() {
 
 XPathNode::XPathNode(const string &xpath_str,
 					 int n_rows,
-					 void *xobj,
-					 shared_ptr<XType> xtype,
-					 shared_ptr<XPathNode> father) {
-	father_node = father;
+					 XNode *xnode) {
 	this->name = xpath_str;
-	this->xtype = xtype;
-	this->xobj = xobj;
 	this->n_rows = n_rows;
+	this->xnode = xnode;
 }
 
 static void register_type(shared_ptr<XType> xtype) {
@@ -543,14 +660,26 @@ void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &
 		throw invalid_argument("cannot set both n_rows and iterator_cb, use one of them");
 	if(xtype == types.end())
 		throw invalid_argument("cannot add xobj, type not exists:'" + xtype_str + "'");
+
+	bool is_cap_needed = false;
+	bool is_pk_exists = false;
+	for(auto &slot_it : xtype->second->slots) {
+		is_cap_needed |= slot_it.second->flags & XRAY_FLAG_RATE;
+		is_pk_exists |= slot_it.second->flags & XRAY_FLAG_PK;
+	}
+
+	if(is_cap_needed && !is_pk_exists)
+		throw invalid_argument("cannot add xobj, type '" + xtype_str + "' has rate enabled but no PK");
+
 	auto father_xpnode = root_xpath;
 	for(auto &xpath_seg : xpath_to_seg(xpath_str)) {
 		if(xpath_seg == "")
 			continue;
 		auto xpath_node_res = father_xpnode->sons.find(xpath_seg);
 		if(xpath_node_res == father_xpnode->sons.end()) {
-			auto xpnode = make_shared<XPathNode>(xpath_seg, n_rows);
+			auto xpnode = make_shared<XPathNode>(xpath_seg, n_rows, this);
 			father_xpnode->sons[xpath_seg] = xpnode;
+			xpnode->self = xpnode;
 			father_xpnode = xpnode;
 		} else {
 			father_xpnode = xpath_node_res->second;
@@ -692,7 +821,7 @@ void XClient::init_socket() {
 	res->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
 	res->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
 	res->connect(conn);
-	cout << "coneecting to: " << conn << " ..." << endl;
+	cout << "Connecting to: " << conn << " ..." << endl;
 }
 
 void XClient::_tx(ResultSet &rs, const string &req_id, uint64_t ts, int avg_ms, const string &widget_id) {
@@ -780,6 +909,26 @@ shared_ptr<ResultSet> XClient::handle_query(const string &query) {
 	}
 }
 
+void XClient::expire_captures() {
+	if(timestamp_diff_in_sec(time, expire_ts) < EXPIRE_CAPTURE_CHECK_SEC)
+		return;
+
+	for(auto it = xnode.expire_pnodes.begin(); it != xnode.expire_pnodes.end();) {
+		if(auto pnode = it->lock()) {
+			if(timestamp_diff_in_sec(time, pnode->last_capture_ts) > EXPIRE_CAPTURE_SEC)
+			{
+				pnode->clear_captures();
+				it = xnode.expire_pnodes.erase(it);
+				continue; /* don't increment iterator , elemnt was deleted */
+			}
+
+		}
+		++it;
+	}
+
+	expire_ts = time;
+}
+
 void XClient::_start() {
 	string hello_msg = HELLO_MSG_PREFIX + node_id;
 	while(true) {
@@ -787,15 +936,17 @@ void XClient::_start() {
 			init_socket();
 			tx(hello_msg);
 		} catch (const exception &e) {
-			cout << "connection to XRAIO server failed: " << e.what() << endl;
+			cout << "Connect to XRAYIO server failed: " << e.what() << endl;
 		}
 		bool cont_rx = true;
 		while(cont_rx) {
+			time = get_current_timestamp();
 			string req_id = "";
 			uint64_t ts;
 			string query;
 			string widget_id = "";
 			try {
+				expire_captures();
 				rx(query, req_id, ts, widget_id);
 				auto rs = handle_query(query);
 				tx(*rs, req_id, ts, 0, widget_id);
@@ -1075,6 +1226,9 @@ int _xray_add_slot(void *type,
 		throw runtime_error{"slot_name should not be null"};
 	if(slot_type == nullptr)
 		throw runtime_error{"slot_type should not be null"};
+	if(new_type->pk && (flags & XRAY_FLAG_PK))
+		throw runtime_error{"type '" + new_type->name + "' already has configured pk on slot '" + new_type->pk->name + "'"};
+
 	new_type->add_slot(slot_name, offset, size, slot_type, is_pointer, arr_size, flags);
 	return 0;
 }
@@ -1087,12 +1241,13 @@ int xray_add_vslot(void *type, const char *vslot_name, xray_vslot_fmt_cb fmt_cb)
 	if(vslot_name == nullptr)
 		throw runtime_error{"vslot_name should not be null"};
 
-	new_type->add_vslot(vslot_name, fmt_cb);
+	new_type->add_vslot(vslot_name, fmt_cb, NULL);
 	return 0;
 }
 
 
 int _xray_register(const char *type, void *obj, const char *path, int n_rows, xray_iterator iterator_cb) {
+
 	c_xclient->xnode.xadd(obj, n_rows, path, type, iterator_cb);
 	return 0;
 }
