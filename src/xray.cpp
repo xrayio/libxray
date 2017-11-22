@@ -820,6 +820,7 @@ void XClient::init_socket() {
 
 	res->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
 	res->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
+	res->setsockopt(ZMQ_IMMEDIATE, 1);
 	res->connect(conn);
 	cout << "Connecting to: " << conn << " ..." << endl;
 }
@@ -903,11 +904,6 @@ shared_ptr<ResultSet> XClient::handle_query(const string &query) {
 		return xnode.xdump(query);
 	} catch (const xpath_not_exists_err &e){
 		cout << "xpath_not_exists_err" << endl;
-		auto rs = make_shared<ResultSet>();
-		rs->push_back(vector<string>{"xquery-invlalid"});
-		return rs;
-	} catch (const exception &e){
-		cout << "unknown error: " << e.what() << endl;
 		auto rs = make_shared<ResultSet>();
 		rs->push_back(vector<string>{"xquery-invlalid"});
 		return rs;
@@ -1267,7 +1263,7 @@ int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
 	auto xtype = types.find(type_name);
 	string str_type_name = type_name;
 	if(xtype == types.end())
-		throw invalid_argument("xray_add_bytype, type not exists:'" + str_type_name + "'");
+		throw invalid_argument("cannot add xobj, type not exists:'" + str_type_name + "'");
 
 	for(auto &slot: xtype->second->slots) {
 		// TODO: support simple formating, needed support for more complicated
