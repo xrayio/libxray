@@ -23,6 +23,7 @@
 #include <sys/time.h>
 
 #include "ordered_map.h"
+#define NDEBUG
 #define ZMQ_CPP11
 #include "zmq.h"
 #include "zmq.hpp"
