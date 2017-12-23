@@ -54,6 +54,7 @@ typedef pair<vector<char>, uint32_t> capture_t;
 #define EXPIRE_CAPTURE_CHECK_SEC (10)
 #define EXPIRE_CAPTURE_SEC  	 (4)
 
+#define XRAY_MAX_ROWS_SHOW (100)
 
 /**
  * EXECPTIONS
@@ -480,7 +481,6 @@ class XPathNode {
 		/* rate calculation */
 		unordered_map<string, capture_t> captures;
 
-
 		string name;
 		weak_ptr<XPathNode> father_node;
 
@@ -580,6 +580,8 @@ void XPathNode::handle_row(shared_ptr<ResultSet> &rs, void *row_ptr) {
 
 void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 {
+	int actual_rows = min(n_rows, XRAY_MAX_ROWS_SHOW);
+
 	if(xtype->capture_needed) {
 		if(last_capture_ts == 0) {
 			xnode->expire_pnodes.push_back(self);
@@ -589,19 +591,21 @@ void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 	}
 
 	if(iterator_cb) {
+		int handled_rows = 0;
 		uint8_t state[XRAY_STATE_MAX_SIZE] = {0};
 		char mem[xtype->size];
 
 		void *row_ptr = iterator_cb(xobj, state, mem);
-		while(row_ptr != nullptr)
+		while(row_ptr != nullptr && handled_rows < XRAY_MAX_ROWS_SHOW)
 		{
 			handle_row(rs, row_ptr);
 			row_ptr = iterator_cb(xobj, state, mem);
+			handled_rows++;
 		}
 	}
 
 	int row_offset = 0;
-	for(auto idx : range(0, n_rows)) {
+	for(auto idx : range(0, actual_rows)) {
 		void *row_ptr = (uint8_t *)xobj + row_offset;
 		handle_row(rs, row_ptr);
 		row_offset += (xtype->size);
