@@ -22,7 +22,8 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <sys/time.h>
-
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "ordered_map.h"
 #define NDEBUG
@@ -148,11 +149,9 @@ static vector<string> split(const string &text, char sep) {
   return tokens;
 }
 
-static void mkdir(string dir)
+static void xray_mkdir(string dir)
 {
-	string cmd = "mkdir -p " + dir;
-	const int dir_err = system(cmd.c_str());
-	if (-1 == dir_err)
+	if(mkdir(dir.c_str(),0777) == -1)
 	{
 		throw cannot_create_path_err();
 	}
@@ -821,8 +820,12 @@ XClient::XClient(const string &api_key) {
 	node_id = create_node_id(cfg["hostname"], __progname, cfg["hostname"], cfg["api_key"]);
 	xray_server_conn = "tcp://" + cfg["server"] + ":" + cfg["port"];
 
-	mkdir("/tmp/xray/");
-	xray_cli_conn = "ipc:///tmp/xray/" + string(__progname);
+	try {
+		xray_cli_conn = "ipc:///tmp/xray/" + string(__progname);
+		xray_mkdir("/tmp/xray/");
+	} catch(cannot_create_path_err &ex) {
+		cout << "Cannot create mount point" << endl;
+	}
 
 	if(cfg["debug"] == "true")
 		debug = true;
@@ -867,7 +870,7 @@ void XClient::init_socket() {
 		cout << "Binding to: " << xray_cli_conn << " ..." << endl;
 		xray_cli_socket = new zmq::socket_t(*ctx, zmq::socket_type::rep);
 		xray_cli_socket->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
-		xray_cli_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
+		//xray_cli_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
 		xray_cli_socket->bind(xray_cli_conn);
 	}
 }
@@ -1036,6 +1039,7 @@ void XClient::_start() {
 			if(xray_server_socket) {
 				tx(xray_server_socket, hello_msg);
 			}
+			cont_rx = true;
 		} catch (const exception &e) {
 			cout << "Connect to XRAYIO server failed: " << e.what() << endl;
 			sleep(3);
