@@ -51,7 +51,7 @@ typedef pair<vector<char>, uint32_t> capture_t;
 
 #define BREAKPOINT	__asm__("int $3")
 
-#define EXPIRE_CAPTURE_CHECK_SEC (10)
+#define EXPIRE_CAPTURE_CHECK_SEC (60)
 #define EXPIRE_CAPTURE_SEC  	 (4)
 
 #define XRAY_MAX_ROWS_SHOW (100)
@@ -587,7 +587,6 @@ void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 			xnode->expire_pnodes.push_back(self);
 		}
 		last_capture_ts = get_current_timestamp();
-
 	}
 
 	if(iterator_cb) {
