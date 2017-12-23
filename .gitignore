@@ -1,6 +1,6 @@
 .cproject
 .project
 dist/*
-xray.egg-info/
+xraycli.egg-info/
 *.idea/
 
