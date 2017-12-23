@@ -56,7 +56,6 @@ class XrayCli(object):
         # print(">SEND ", node, ": ", msg.to_json())
         # self.request.send(node.encode('ascii'), zmq.SNDMORE)
         self.request.send_json(msg.to_json())
-
         node_id = self.request.recv_string(encoding='ascii')
         msg = self.request.recv_json()
         # print("<RECV", msg)
