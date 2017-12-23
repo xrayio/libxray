@@ -1304,19 +1304,37 @@ int main(int argc, char **argv) {
  * C API
  */
 
-XClient *c_xclient;
+XClient *c_xclient = nullptr;
+
+static void xray_is_initiated(void)
+{
+	if(c_xclient == nullptr)
+	{
+		throw runtime_error{"xclient is not initiated"};
+	}
+}
 
 int xray_init(const char *api_key) {
-	register_basic_types();
-	c_xclient = new XClient(api_key);
-	c_xclient->start();
-	return c_xclient != nullptr;
+	try {
+		register_basic_types();
+		c_xclient = new XClient(api_key);
+		c_xclient->start();
+		return c_xclient != nullptr;
+	} catch(exception &ex) {
+		cout << "ERROR: xray_int. reason: " << ex.what() << endl;
+	}
+	return 1;
 }
 
 void *_xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb) {
-	 auto new_type = make_shared<XType>(type_name, size, "", fmt_type_cb);
-	 register_type(new_type);
-	 return (void *)new_type.get();
+	try {
+		auto new_type = make_shared<XType>(type_name, size, "", fmt_type_cb);
+		register_type(new_type);
+		return (void *)new_type.get();
+	} catch(exception &ex) {
+		cout << "ERROR: add_vslot. resaon: " << ex.what() << endl;
+	}
+	return NULL;
 }
 
 int _xray_add_slot(void *type,
@@ -1326,37 +1344,54 @@ int _xray_add_slot(void *type,
 				   int is_pointer,
 				   int arr_size,
 				   int flags) {
-	auto new_type = static_cast<XType *>(type);
-	if(type == nullptr)
-		throw runtime_error{"type should not be null"};
-	if(slot_name == nullptr)
-		throw runtime_error{"slot_name should not be null"};
-	if(slot_type == nullptr)
-		throw runtime_error{"slot_type should not be null"};
-	if(new_type->pk && (flags & XRAY_FLAG_PK))
-		throw runtime_error{"type '" + new_type->name + "' already has configured pk on slot '" + new_type->pk->name + "'"};
+	try {
+		xray_is_initiated();
+		auto new_type = static_cast<XType *>(type);
+		if(type == nullptr)
+			throw runtime_error{"type should not be null"};
+		if(slot_name == nullptr)
+			throw runtime_error{"slot_name should not be null"};
+		if(slot_type == nullptr)
+			throw runtime_error{"slot_type should not be null"};
+		if(new_type->pk && (flags & XRAY_FLAG_PK))
+			throw runtime_error{"type '" + new_type->name + "' already has configured pk on slot '" + new_type->pk->name + "'"};
 
-	new_type->add_slot(slot_name, offset, size, slot_type, is_pointer, arr_size, flags);
+		new_type->add_slot(slot_name, offset, size, slot_type, is_pointer, arr_size, flags);
+	} catch(exception &ex) {
+		cout << "ERROR: add_slot. reason: " << ex.what() << endl;
+	}
 	return 0;
 }
 
 int xray_add_vslot(void *type, const char *vslot_name, xray_vslot_fmt_cb fmt_cb) {
-	auto new_type = static_cast<XType *>(type);
+	int rc = 0;
+	try {
+		xray_is_initiated();
+		auto new_type = static_cast<XType *>(type);
 
-	if(type == nullptr)
-		throw runtime_error{"type should not be null"};
-	if(vslot_name == nullptr)
-		throw runtime_error{"vslot_name should not be null"};
+		if(type == nullptr)
+			throw runtime_error{"type should not be null"};
+		if(vslot_name == nullptr)
+			throw runtime_error{"vslot_name should not be null"};
 
-	new_type->add_vslot(vslot_name, fmt_cb, NULL);
+		new_type->add_vslot(vslot_name, fmt_cb, NULL);
+	} catch(exception &ex) {
+		cout << "ERROR: add_vslot. reason: " << ex.what() << endl;
+	}
 	return 0;
 }
 
 
 int _xray_register(const char *type, void *obj, const char *path, int n_rows, xray_iterator iterator_cb) {
 
-	c_xclient->xnode.xadd(obj, n_rows, path, type, iterator_cb);
-	return 0;
+	try {
+		xray_is_initiated();
+		c_xclient->xnode.xadd(obj, n_rows, path, type, iterator_cb);
+		return 0;
+	} catch(exception &ex) {
+		cout << "ERROR: register. reason: "<< ex.what() << endl;
+	}
+	return -1;
 }
 
 void xray_dump(const char *path) {
@@ -1366,21 +1401,28 @@ void xray_dump(const char *path) {
 
 int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
 {
-	auto xtype = types.find(type_name);
-	string str_type_name = type_name;
-	if(xtype == types.end())
-		throw invalid_argument("cannot add xobj, type not exists:'" + str_type_name + "'");
+	int rc = 0;
+	try {
+		xray_is_initiated();
+		auto xtype = types.find(type_name);
+		string str_type_name = type_name;
+		if(xtype == types.end())
+			throw invalid_argument("cannot add xobj, type not exists:'" + str_type_name + "'");
 
-	for(auto &slot: xtype->second->slots) {
-		// TODO: support simple formating, needed support for more complicated
-		if(slot.second->flags & XRAY_FLAG_CONST)
-			continue;
-		int slot_offset = slot.second->offset;
-		void *slot_dst_ptr = (uint8_t *)row_dst + slot_offset;
-		void *slot_toadd_ptr = (uint8_t *)row_toadd + slot_offset;
-		int slot_size = slot.second->type->size;
-		//TODO: make signed awarenes
-		add_int_value_of_slot(slot_size, 0, slot_dst_ptr, slot_toadd_ptr, slot.second->is_refernce);
+		for(auto &slot: xtype->second->slots) {
+			// TODO: support simple formating, needed support for more complicated
+			if(slot.second->flags & XRAY_FLAG_CONST)
+				continue;
+			int slot_offset = slot.second->offset;
+			void *slot_dst_ptr = (uint8_t *)row_dst + slot_offset;
+			void *slot_toadd_ptr = (uint8_t *)row_toadd + slot_offset;
+			int slot_size = slot.second->type->size;
+			//TODO: make signed awarenes
+			add_int_value_of_slot(slot_size, 0, slot_dst_ptr, slot_toadd_ptr, slot.second->is_refernce);
+		}
+	} catch(exception &ex) {
+		cout << "ERROR: add bytype. resaon: "<< ex.what() << endl;
+		rc = -1;
 	}
-	return 0;
+	return rc;
 }
