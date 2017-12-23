@@ -17,7 +17,7 @@ ZMQPP_DIR:=${PKG_DIR}/cppzmq
 JSON_DIR:=${PKG_DIR}/json
 
 
-.PHONY: all pull debug clean libxray test-api
+.PHONY: all pull debug clean libxray test-api xraycli
 
 all: libxray
 	${Q}echo "\033[32mXRAY: done!\033[0m"
@@ -68,3 +68,5 @@ libxray-debug:
 	${Q}cp ${SRC_DIR}/xray.h ${INSTALL_DIR}/
 
 
+xraycli:
+	${Q} pip install -e .

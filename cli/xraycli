@@ -16,7 +16,7 @@ class MsgToXnode(object):
     def to_json(self, ts=0):
         self.REQ_ID += 1
         return {"req_id": str(self.REQ_ID),
-                "widget_id": "xray-cli",
+                "widget_id": "xraycli",
                 "query": self.xquery,
                 "timestamp": int(ts)}
 
