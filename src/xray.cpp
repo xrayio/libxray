@@ -14,6 +14,7 @@
 #include <iostream>
 #include <cstdarg>
 #include <thread>
+#include <cstdlib>
 
 #include <stdint.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <sys/time.h>
+
 
 #include "ordered_map.h"
 #define NDEBUG
@@ -50,6 +52,46 @@ typedef pair<vector<char>, uint32_t> capture_t;
 
 #define EXPIRE_CAPTURE_CHECK_SEC (10)
 #define EXPIRE_CAPTURE_SEC  	 (4)
+
+
+/**
+ * EXECPTIONS
+ */
+
+class cluster_not_exists_err: public std::exception
+{
+	const char* what() const throw() { return "Cluster not exists\n"; }
+};
+
+class quit_err: public std::exception
+{
+	const char* what() const throw() { return "Recved quit\n"; }
+};
+
+class msg_rx_timeout_err: public std::exception
+{
+	const char* what() const throw() { return "Recved quit\n"; }
+};
+
+class xpath_not_exists_err: public std::exception
+{
+	const char* what() const throw() { return "xpath not exists\n"; }
+};
+
+class fmt_cb_result_too_big: public std::exception
+{
+	const char* what() const throw () {
+		return "fmt_db_result_too_big \n";
+	}
+};
+
+class cannot_create_path_err: public std::exception
+{
+	const char* what() const throw () {
+		return "cannot create directory \n";
+	}
+};
+
 
 template<class T>
 class Stats {
@@ -104,6 +146,16 @@ static vector<string> split(const string &text, char sep) {
   }
   tokens.push_back(text.substr(start));
   return tokens;
+}
+
+static void mkdir(string dir)
+{
+	string cmd = "mkdir -p " + dir;
+	const int dir_err = system(cmd.c_str());
+	if (-1 == dir_err)
+	{
+		throw cannot_create_path_err();
+	}
 }
 
 static vector<string> xpath_to_seg(const string &path) {
@@ -185,39 +237,6 @@ static void add_int_value_of_slot(int slot_size, int is_signed, void *slot_dst_p
 			break;
 	}
 }
-
-/**
- * EXECPTIONS
- */
-
-class cluster_not_exists_err: public std::exception
-{
-	const char* what() const throw() { return "Cluster not exists\n"; }
-};
-
-class quit_err: public std::exception
-{
-	const char* what() const throw() { return "Recved quit\n"; }
-};
-
-class msg_rx_timeout_err: public std::exception
-{
-	const char* what() const throw() { return "Recved quit\n"; }
-};
-
-class xpath_not_exists_err: public std::exception
-{
-	const char* what() const throw() { return "xpath not exists\n"; }
-};
-
-class fmt_cb_result_too_big: public std::exception
-{
-	const char* what() const throw () {
-
-		return "fmt_db_result_too_big \n";
-	}
-};
-
 
 /**
  * VXSLOT
@@ -343,6 +362,10 @@ static uint32_t get_current_timestamp() {
 
 	uint64_t miliseconds = tm.tv_sec * 1000 + tm.tv_nsec / 1000 / 1000;
 	return miliseconds;
+}
+
+static bool atleast_second_passed(uint32_t curr_sec) {
+	return curr_sec != get_current_timestamp();
 }
 
 static uint32_t timestamp_diff_in_sec(uint32_t ts_a, uint32_t ts_b) {
@@ -549,7 +572,7 @@ void XPathNode::handle_row(shared_ptr<ResultSet> &rs, void *row_ptr) {
 	if(format_row(row, row_ptr, cap, xtype) == false)
 		rs->push_back(move(row));
 
-	if(xtype->capture_needed) {
+	if(xtype->capture_needed && atleast_second_passed(cap->second)) {
 		memcpy(cap->first.data(), row_ptr, xtype->size);
 		cap->second = get_current_timestamp();
 	}
@@ -774,7 +797,12 @@ void XClient::get_cfg(const string &api_key) {
 	}
 	hostname = buff;
 
-	auto env_json = json::parse(cfg_json);
+	nlohmann::json env_json;
+	try {
+		env_json = json::parse(cfg_json);
+	} catch (nlohmann::detail::parse_error &e) {
+		cout << "Error: cannot parse cfg " << cfg_json << endl;
+	}
 	set_if_exists(cfg, "server", env_json, XRAYIO_HOST);
 	set_if_exists(cfg, "port", env_json, XRAYIO_PORT);
 	set_if_exists(cfg, "api_key", env_json, api_key);
@@ -791,7 +819,11 @@ void XClient::get_cfg(const string &api_key) {
 XClient::XClient(const string &api_key) {
 	get_cfg(api_key);
 	node_id = create_node_id(cfg["hostname"], __progname, cfg["hostname"], cfg["api_key"]);
-	conn = "tcp://" + cfg["server"] + ":" + cfg["port"];
+	xray_server_conn = "tcp://" + cfg["server"] + ":" + cfg["port"];
+
+	mkdir("/tmp/xray/");
+	xray_cli_conn = "ipc:///tmp/xray/" + string(__progname);
+
 	if(cfg["debug"] == "true")
 		debug = true;
 }
@@ -802,14 +834,17 @@ XClient::~XClient() {
 }
 
 void XClient::destroy_socket() {
-	if(res) {
-		res->close();
-		delete res;
+	if(xray_server_socket) {
+		xray_server_socket->close();
+		delete xray_server_socket;
+		xray_server_socket = nullptr;
 	}
-	//if(ctx) {
-	//	ctx->close();
-	//	delete ctx;
-	//}
+
+	if(xray_cli_socket) {
+		xray_cli_socket->close();
+		delete xray_cli_socket;
+		xray_cli_socket = nullptr;
+	}
 }
 
 void XClient::init_socket() {
@@ -817,16 +852,33 @@ void XClient::init_socket() {
 
 	if(ctx == nullptr)
 		ctx = new zmq::context_t(1);
-	res = new zmq::socket_t(*ctx, zmq::socket_type::dealer);
 
-	res->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
-	res->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
-	res->setsockopt(ZMQ_IMMEDIATE, 1);
-	res->connect(conn);
-	cout << "Connecting to: " << conn << " ..." << endl;
+	if(xray_server_socket == nullptr) {
+//		cout << "Connecting to: " << xray_server_conn << " ..." << endl;
+//		xray_server_socket = new zmq::socket_t(*ctx, zmq::socket_type::dealer);
+
+//		/xray_server_socket->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
+//		xray_server_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
+//		xray_server_socket->setsockopt(ZMQ_IMMEDIATE, 1);
+//		xray_server_socket->connect(xray_server_conn);
+	}
+
+	if(xray_cli_socket == nullptr) {
+		cout << "Binding to: " << xray_cli_conn << " ..." << endl;
+		xray_cli_socket = new zmq::socket_t(*ctx, zmq::socket_type::rep);
+		xray_cli_socket->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
+		xray_cli_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
+		xray_cli_socket->bind(xray_cli_conn);
+	}
 }
 
-void XClient::_tx(ResultSet &rs, const string &req_id, uint64_t ts, int avg_ms, const string &widget_id) {
+void XClient::_tx(zmq::socket_t *socket,
+				  ResultSet &rs,
+				  const string &req_id,
+				  uint64_t ts,
+				  int avg_ms,
+				  const string &widget_id)
+{
 	json response = json::object();
 	json rs_json = rs;
 
@@ -839,34 +891,77 @@ void XClient::_tx(ResultSet &rs, const string &req_id, uint64_t ts, int avg_ms, 
 	string res_str = response.dump(-1, ' ', true);
 	if(debug)
 		cout << "sending: " << res_str << endl;
-	res->send("", 0, ZMQ_SNDMORE);
-	res->send(res_str.c_str(), res_str.size());
+	socket->send("", 0, ZMQ_SNDMORE);
+	socket->send(res_str.c_str(), res_str.size());
 }
 
 
-void XClient::tx(ResultSet &rs, const string &req_id, const uint64_t ts, int avg_ms, const string &widget_id) {
-	_tx(rs, req_id, ts, avg_ms, widget_id);
+void XClient::tx(zmq::socket_t *socket,
+				 ResultSet &rs,
+				 const string &req_id,
+				 const uint64_t ts,
+				 int avg_ms,
+				 const string &widget_id)
+{
+	_tx(socket, rs, req_id, ts, avg_ms, widget_id);
 }
 
-void XClient::tx(string &msg, const string &req_id, const uint64_t ts, int avg_ms) {
+void XClient::tx(zmq::socket_t *socket,
+		         string &msg,
+				 const string &req_id,
+				 const uint64_t ts,
+				 int avg_ms)
+{
 	ResultSet rs = {{msg}};
-	_tx(rs, req_id, ts, avg_ms);
+	_tx(socket, rs, req_id, ts, avg_ms);
 }
 
-void XClient::rx(string &query, string &req_id, uint64_t &ts, string &widget_id) {
-	zmq::message_t message;
-	zmq::message_t message1;
-	zmq::message_t message2;
+zmq::socket_t *XClient::rx_socket(zmq::message_t &request) {
+	zmq::message_t m1;
+	zmq::message_t m2;
+	zmq::message_t m3;
 
-	res->recv(&message, ZMQ_RCVMORE);
-	res->recv(&message1, ZMQ_RCVMORE);
-	res->recv(&message2);
 
-	string msg_str = string(static_cast<char*>(message2.data()), message2.size());
+
+//	zmq::pollitem_t items [] = {
+//		{ (void *) xray_cli_socket, 0, ZMQ_POLLIN, 0 }
+//		{ xray_server_socket, 0, ZMQ_POLLIN, 0 },
+//	};
+
+//	cout << "1" << endl;
+//	zmq::poll (items, 1, -1);
+//	cout << "2" << endl;
+//	if (items [0].revents & ZMQ_POLLIN) {
+		xray_cli_socket->recv(&m1, ZMQ_RCVMORE);
+		auto s1 = string(static_cast<char*>(m1.data()), m1.size());
+		xray_cli_socket->recv(&m2, ZMQ_RCVMORE);
+		auto s2 = string(static_cast<char*>(m2.data()), m2.size());
+		xray_cli_socket->recv(&m3, ZMQ_RCVMORE);
+		auto s3 = string(static_cast<char*>(m3.data()), m3.size());
+		xray_cli_socket->recv(&request);
+		auto s4 = string(static_cast<char*>(request.data()), request.size());
+//	}
+
+//	if (items [1].revents & ZMQ_POLLIN) {
+//		xray_server_socket->recv(&m1, ZMQ_RCVMORE);
+//		xray_server_socket->recv(&m2, ZMQ_RCVMORE);
+//		xray_server_socket->recv(&m3);
+//	}
+		return xray_cli_socket;
+}
+
+zmq::socket_t *XClient::rx(string &query, string &req_id, uint64_t &ts, string &widget_id) {
+	zmq::message_t msg_request;
+
+	auto socket = rx_socket(msg_request);
+
+	string msg_str = string(static_cast<char*>(msg_request.data()), msg_request.size());
 	if(debug)
-		cout << "XClient recv: " << msg_str << "size " << message2.size() << endl;
+		cout << "XClient recv: " << msg_str << "size " << msg_request.size() << endl;
+
 	if(msg_str == "")
 		throw msg_rx_timeout_err();
+
 	//TODO: add here exception handler
 	/*
 		 @throw parse_error.101 in case of an unexpected token
@@ -879,6 +974,7 @@ void XClient::rx(string &query, string &req_id, uint64_t &ts, string &widget_id)
 	query = json["query"];
 	ts = json["timestamp"];
 	widget_id = json["widget_id"];
+	return socket;
 }
 
 inline bool ends_with(std::string const & value, std::string const & ending)
@@ -933,14 +1029,19 @@ void XClient::expire_captures() {
 
 void XClient::_start() {
 	string hello_msg = HELLO_MSG_PREFIX + node_id;
+	bool cont_rx = true;
 	while(true) {
 		try{
 			init_socket();
-			tx(hello_msg);
+			if(xray_server_socket) {
+				tx(xray_server_socket, hello_msg);
+			}
 		} catch (const exception &e) {
 			cout << "Connect to XRAYIO server failed: " << e.what() << endl;
+			sleep(3);
+			cont_rx = false;
 		}
-		bool cont_rx = true;
+
 		while(cont_rx) {
 			time = get_current_timestamp();
 			string req_id = "";
@@ -949,20 +1050,20 @@ void XClient::_start() {
 			string widget_id = "";
 			try {
 				expire_captures();
-				rx(query, req_id, ts, widget_id);
+				auto socket = rx(query, req_id, ts, widget_id);
 				auto rs = handle_query(query);
-				tx(*rs, req_id, ts, 0, widget_id);
+				tx(socket, *rs, req_id, ts, 0, widget_id);
 			} catch (const quit_err &e) {
 				cout << "Bye bye, received quit" << endl;
 				cont_rx = false;
 			} catch (const cluster_not_exists_err &e) {
-				cout << "cluster not exists" << endl;
+				cout << "Cluster not exists" << endl;
 				return;
 			} catch (const msg_rx_timeout_err &e) {
-				cout << "rx timeout, reconnecting" << endl;
+				cout << "Rx timeout, reconnecting" << endl;
 				cont_rx = false;
 			} catch (const exception &e) {
-				cout << "unknown error: " << e.what() << endl;
+				cout << "Unknown error: " << e.what() << endl;
 				cont_rx = false;
 			}
 		}
@@ -1092,7 +1193,7 @@ struct XServer_simulate {
 };
 
 XServer_simulate::XServer_simulate() {
-	//res.bind("tcp://*:" + to_string(XNODE_SERVER_PORT));
+	//xray_server_socket.bind("tcp://*:" + to_string(XNODE_SERVER_PORT));
 }
 
 void XServer_simulate::recv(string &rs_json_str) {
