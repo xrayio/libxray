@@ -364,8 +364,10 @@ static uint32_t get_current_timestamp() {
 	return miliseconds;
 }
 
-static bool atleast_second_passed(uint32_t curr_sec) {
-	return curr_sec != get_current_timestamp();
+static bool atleast_second_passed(uint32_t last_ms) {
+	uint32_t curr_sec = get_current_timestamp() / 1000;
+	uint32_t last_sec = last_ms / 1000;
+	return last_sec != curr_sec;
 }
 
 static uint32_t timestamp_diff_in_sec(uint32_t ts_a, uint32_t ts_b) {
@@ -499,6 +501,7 @@ void XPathNode::clear_captures() {
 string XPathNode::format_slot(shared_ptr<XSlot> &slot, void *slot_ptr) {
 	int slot_size = slot->type->size;
 	string formatted(XRAY_MAX_SLOT_STR_SIZE * 2, 0);
+
 	if(slot->type->fmt_cb) {
 		int len = slot->type->fmt_cb(slot_ptr, &formatted[0]);
 		formatted.resize(len);
