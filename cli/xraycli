@@ -5,7 +5,7 @@ import os
 
 import zmq
 from tabulate import tabulate
-
+from pandas import DataFrame
 
 class MsgToXnode(object):
     REQ_ID = 0
@@ -71,10 +71,13 @@ class XrayCli(object):
             node_xpath = "/"
         return self.send_recv(node, MsgToXnode(node_xpath))
 
-    def run(self, full_xpath):
+    def run(self, full_xpath, query):
         result_set = self.get_result_set(full_xpath)
-        table = tabulate(result_set[1:], headers=result_set[0])
-        print(table)
+        
+        df = DataFrame.from_records(result_set[1:], columns =result_set[0])
+        if query:
+            df = df.query(query)
+        print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
 
     def close(self):
         try:
@@ -86,7 +89,7 @@ class XrayCli(object):
 
 def usage():
     print("usage:")
-    print("\txraycli <path>")
+    print("\txraycli path <pandas-query>")
 
 
 if __name__ == "__main__":
@@ -95,7 +98,10 @@ if __name__ == "__main__":
         exit(-1)
     xcli = XrayCli()
     try:
-        xcli.run(sys.argv[1])
+        query = None
+        if len(sys.argv) > 2:
+            query = " ".join(sys.argv[2:])
+        xcli.run(sys.argv[1], query)
     finally:
         xcli.close()
 

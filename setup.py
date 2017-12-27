@@ -14,6 +14,7 @@ setup(
     install_requires=[
         'zmq',
         'tabulate',
+        'pandas',
     ],
     license='MIT',
     scripts=['cli/xraycli']
