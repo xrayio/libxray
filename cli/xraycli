@@ -25,6 +25,27 @@ class NoNodesError(Exception):
     pass
 
 
+def humanize_number(value, fraction_point=1):
+    powers = [10 ** x for x in (12, 9, 6, 3, 0)]
+    human_powers = ('T', 'B', 'M', 'K', '')
+    is_negative = False
+    return_value = 0
+    
+    if not isinstance(value, float):
+        value = float(value)
+    if value < 0:
+        is_negative = True
+        value = abs(value)
+    for i, p in enumerate(powers):
+        if value >= p:
+            return_value = str(round(value / (p / (10.0 ** fraction_point))) /
+                               (10 ** fraction_point)) + human_powers[i]
+            break
+    if is_negative:
+        return_value = "-" + return_value
+
+    return return_value
+
 class XrayCli(object):
     XRAY_NODES_PATH = '/tmp/xray/'
 
@@ -70,11 +91,20 @@ class XrayCli(object):
         if node_xpath == '':
             node_xpath = "/"
         return self.send_recv(node, MsgToXnode(node_xpath))
-
+    
+    def humanize_column(self, column):
+        return [humanize_number(int(value)) for value in column]
+    
+    def huminify_rates(self, df):
+        columns = df.columns
+        rate_columns = [column for column in columns if column.endswith("-rate")]
+        df[rate_columns] = df[rate_columns].apply(self.humanize_column)
+        
     def run(self, full_xpath, query):
         result_set = self.get_result_set(full_xpath)
         
-        df = DataFrame.from_records(result_set[1:], columns =result_set[0])
+        df = DataFrame.from_records(result_set[1:], columns=result_set[0])
+        self.huminify_rates(df)
         if query:
             df = df.query(query)
         print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
