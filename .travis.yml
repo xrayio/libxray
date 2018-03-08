@@ -3,11 +3,12 @@ dist: trusy
 sudo: required
 compiler: gcc
 os: linux
+services: docker
 python: "2.7"
 before_install:
-- sudo apt-get update
+- docker build -t xray-test .
+- docker run -v `pwd`:/libxray -t test-xray bash
 install:
-- sudo make init-ubuntu14.04
-- sudo make xraycli
+- make xraycli
 script:
 - make test
