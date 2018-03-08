@@ -1,15 +1,18 @@
 language: cpp
 dist: trusy
 sudo: required
-compiler: gcc
+- compiler: gcc
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-5
+      env: CXX=g++-5
 os: linux
-services: 
-- docker
 python: "2.7"
 before_install:
-- docker build -t xray-test .
-- docker run -v `pwd`:/libxray -t test-xray bash
-install:
-- make xraycli
+- sudo make init-ubuntu14.04
+- sudo make xraycli
 script:
 - make test
