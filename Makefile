@@ -16,7 +16,7 @@ TSL_DIR:=${PKG_DIR}/tsl
 ZMQPP_DIR:=${PKG_DIR}/cppzmq
 JSON_DIR:=${PKG_DIR}/json
 
-DEBUG_SANITIZE:=-fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined
+DEBUG_SANITIZE:=-fsanitize=address -fno-omit-frame-pointer # -fsanitize=undefined
 SYS_INC:=-I/usr/include -I/usr/local/include
 SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
 
