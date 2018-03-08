@@ -21,7 +21,7 @@ SYS_INC:=-I/usr/include -I/usr/local/include
 SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
 
 
-.PHONY: all pull debug clean libxray test-app xraycli test
+.PHONY: all pull debug clean libxray test-app xraycli test test-in-docker
 
 all: libxray
 	${Q}echo "\033[32mXRAY: done!\033[0m"
@@ -62,3 +62,6 @@ test-app: libxray-debug
 test: test-app xraycli
 	${Q}export XRAY_ROOT=$(abspath ${WORK_DIR}); \
 	python test/xray-test.py
+
+test-in-docker:
+	docker-compose -f docker-test.yml up
