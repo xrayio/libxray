@@ -27,7 +27,7 @@ all: libxray
 	${Q}echo "\033[32mXRAY: done!\033[0m"
 
 init-ubuntu14.04:
-	sudo add-apt-repository ppa:chris-lea/libsodium
+	sudo add-apt-repository -y ppa:chris-lea/libsodium
 	sudo echo "deb http://ppa.launchpad.net/chris-lea/libsodium/ubuntu trusty main" >> /etc/apt/sources.list
 	sudo echo "deb-src http://ppa.launchpad.net/chris-lea/libsodium/ubuntu trusty main" >> /etc/apt/sources.list
 	sudo apt-get update -y
