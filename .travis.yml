@@ -8,6 +8,10 @@ addons:
             - ubuntu-toolchain-r-test
           packages:
             - g++-5
+<<<<<<< 7ee809bf899b306e4d067e441fa59e1823cd8829
+=======
+            - gcc-5
+>>>>>>> docker test
       env: COMPILER=g++-5
 os: linux
 python: "2.7"

@@ -1,0 +1,5 @@
+sut:
+  build: .
+  command: make xraycli && make test
+  volumes:
+     -.:/libxray
