@@ -45,8 +45,7 @@ extern "C"
 	int _xray_add_slot(void *type, const char *slot_name, int offset, int size, const char *slot_type, int is_pointer, int arr_size, int flags);
 	int xray_add_vslot(void *type, const char *vslot_name, xray_vslot_fmt_cb fmt_cb);
 	int _xray_register(const char *type, void *obj, const char *path, int n_rows, xray_iterator iterator_cb);
-	void xray_dump(const char *path);
-	//TODO: checl sizeof(slot) == sizeof(slot_type)
+	int xray_unregister(const char *path);
 
 	/* UTILS */
 	/* Adding two rows of same type */

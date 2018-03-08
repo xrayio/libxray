@@ -1,0 +1,15 @@
+language: cpp
+dist: trusty
+sudo: required
+compiler: gcc
+os: linux
+python: 2.7
+before_install:
+	sudo apt-get update
+
+install:
+	- sudo apt-get install libzmq-dev
+	- make xraycli
+
+script:
+	- make test

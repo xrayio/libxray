@@ -16,8 +16,12 @@ TSL_DIR:=${PKG_DIR}/tsl
 ZMQPP_DIR:=${PKG_DIR}/cppzmq
 JSON_DIR:=${PKG_DIR}/json
 
+DEBUG_SANITIZE:=-fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined
+SYS_INC:=-I/usr/include -I/usr/local/include
+SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
 
-.PHONY: all pull debug clean libxray test-api xraycli
+
+.PHONY: all pull debug clean libxray test-app xraycli test
 
 all: libxray
 	${Q}echo "\033[32mXRAY: done!\033[0m"
@@ -30,43 +34,31 @@ init-ubuntu14.04:
 	sudo apt-get -y --force-yes install libsodium-dev
 	sudo apt-get install -y --force-yes libzmq3=4.0.4+dfsg-2 libzmq3-dev=4.0.4+dfsg-2
 	sudo apt-get install -y --force-yes libpgm-dev
-	
 
-pull:
-	# git pull --recurse-submodules
-	git submodule update --init --recursive
-
-libzmq-fromsrc:
-	${Q}echo "building zmq"
-	${Q}cd ${ZMQ_DIR} && ./autogen.sh
-	${Q}cd ${ZMQ_DIR} && ./configure
-	${Q}make -C ${ZMQ_DIR}
-	${Q}cp ${ZMQ_DIR}/include/*.h ${PKG_INSTALL_DIR}/
-	${Q}cp ${ZMQ_DIR}/src/.libs/*.a ${PKG_INSTALL_DIR}/
-	
 clean:
 	${Q}rm -rf ${INSTALL_DIR}/*
 
-DEBUG_SANITIZE:=-fsanitize=address -fno-omit-frame-pointer
-SYS_INC:=-I/usr/include -I/usr/local/include
-SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
-
-test-api: libxray-debug
-	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -o ${INSTALL_DIR}/test-c-api ${SRC_DIR}/test-c-api.c -lxray -lstdc++ -lzmq
-	./dist/test-c-api
+run-test-app: test-app
+	./dist/test-app
 
 libxray:
 	${Q}g++ -c -g -O2 -I${PKG_INSTALL_DIR} ${SYS_INC} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp
 	${Q}ar rcs ${INSTALL_DIR}/libxray.a ${INSTALL_DIR}/xray.o 
 	${Q}#g++ -shared -o ${INSTALL_DIR}/libxray.so -lzmq -L${INSTALL_DIR} -L/usr/lib/x86_64-linux-gnu/ ${INSTALL_DIR}/xray.o
-	${Q}cp ${SRC_DIR}/xray.h ${INSTALL_DIR}/
+	${Q}ln -sf ../${SRC_DIR}/xray.h ${INSTALL_DIR}/xray.h
 	${Q}#gcc -g -O0 -L${INSTALL_DIR} -fsanitize=address -lxray -o ${INSTALL_DIR}/xray-ctest ${SRC_DIR}/xray-c.c
 
 libxray-debug:
 	${Q}g++ -c -g -O0 -I${PKG_INSTALL_DIR} ${SYS_INC} ${DEBUG_SANITIZE} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp	
 	${Q}ar rcs ${INSTALL_DIR}/libxray.a ${INSTALL_DIR}/xray.o
-	${Q}cp ${SRC_DIR}/xray.h ${INSTALL_DIR}/
-
+	${Q}ln -sf ../${SRC_DIR}/xray.h ${INSTALL_DIR}/xray.h
 
 xraycli:
 	${Q} pip install -e .
+
+test-app: libxray-debug
+	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -o ${INSTALL_DIR}/test-app ${SRC_DIR}/test-app.c -lxray -lstdc++ -lzmq
+
+test: test-app
+	${Q}export XRAY_ROOT=$(abspath ${WORK_DIR}); \
+	python test/xray-test.py

@@ -22,21 +22,27 @@ using namespace std;
 
 typedef vector<vector<string>> ResultSet;
 class XPathNode;
+class XType;
 
 class XNode {
-	shared_ptr<XPathNode> root_xpath = make_shared<XPathNode>("/", 0);
-	unordered_map <void *, string> xobj_to_path;
-
+	shared_ptr<XPathNode> root_xpath = make_shared<XPathNode>("/");
 	public:
 		list<weak_ptr<XPathNode>> expire_pnodes;
+		unordered_map <string, shared_ptr<XType> > types;
 
+		XNode();
 		void xadd(void *xobj,
 				  int n_rows,
 				  const string &xpath_str,
 				  const string &xtype_str,
 				  xray_iterator iterator_cb=nullptr);
+		void xdelete(const string &xpath_str);
 		shared_ptr<ResultSet> xdump(const string &xtype_str);
 		void destroy();
+		void register_basic_types();
+		void register_type(shared_ptr<XType> xtype);
+		shared_ptr<XPathNode> find_path_node(const string &xpath_str,
+											 bool create_path);
 };
 
 class XClient {
@@ -84,6 +90,8 @@ class XClient {
 
 public:
 	thread *xclient_thread = nullptr;
+	mutex back_end_lock; // Lock btw back end / front end
+
 	/* for tests */
 	int rx_timeout = 30000;
 
