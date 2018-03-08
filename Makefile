@@ -32,7 +32,7 @@ init-ubuntu14.04:
 	sudo echo "deb-src http://ppa.launchpad.net/chris-lea/libsodium/ubuntu trusty main" >> /etc/apt/sources.list
 	sudo apt-get update -y
 	sudo apt-get -y --force-yes install libsodium-dev
-	sudo apt-get install -y --force-yes libzmq3=4.0.4+dfsg-2 libzmq3-dev=4.0.4+dfsg-2
+	sudo apt-get install -y --force-yes libzmq3 libzmq3-dev
 	sudo apt-get install -y --force-yes libpgm-dev
 
 clean:
