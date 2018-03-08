@@ -3,7 +3,8 @@ dist: trusy
 sudo: required
 compiler: gcc
 os: linux
-services: docker
+services: 
+- docker
 python: "2.7"
 before_install:
 - docker build -t xray-test .
