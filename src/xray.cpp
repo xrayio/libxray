@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <thread>
 #include <cstdlib>
+#include <mutex>
 
 #include <stdint.h>
 #include <string.h>
@@ -42,7 +43,6 @@ class XPathNode;
 class XType;
 class XSlot;
 
-unordered_map <string, shared_ptr<XType> > types;
 typedef pair<vector<char>, uint32_t> capture_t;
 
 /**
@@ -94,27 +94,12 @@ class cannot_create_path_err: public std::exception
 	}
 };
 
-
-template<class T>
-class Stats {
-	static int instance_count;
-public:
-	Stats() {
-		instance_count++;
-		this->print();
-	}
-	~Stats() {
-		instance_count--;
-		this->print();
-	}
-	static void print() {
-		std::cout << instance_count << " instances of " << typeid(T).name()
-				<< ", " << sizeof(T) << " bytes each." << std::endl;
+class PathNotExistsError: public exception
+{
+	const char* what() const throw () {
+		return "path not exists \n";
 	}
 };
-
-template<class T>
-int Stats<T>::instance_count = 0;
 
 string string_vsprintf(const char* format, va_list args) {
     va_list tmp_args; //unfortunately you cannot consume a va_list twice
@@ -238,6 +223,38 @@ static void add_int_value_of_slot(int slot_size, int is_signed, void *slot_dst_p
 	}
 }
 
+static int xray_string_fmt(void *slot, char *output_str) {
+	return snprintf(output_str, XRAY_MAX_SLOT_STR_SIZE, "%s", (char *)slot);
+}
+
+static int xray_p_string_fmt(void *slot, char *output_str) {
+	c_p_string_t str = (c_p_string_t)slot;
+	return snprintf(output_str, XRAY_MAX_SLOT_STR_SIZE, "%s", *str);
+}
+
+static string create_node_id(const string &hostname, const string &nodename,
+					  	     const string &node_index, const string &key) {
+	string s = {nodename + ":" + node_index + ":" + key + ":" + hostname};
+	return s;
+}
+
+#define XRAY_CFG_ENV "XRAY_CONFIG"
+#define XRAYIO_HOST "www.xrayio.com"
+#define XRAYIO_PORT "40001"
+
+#define HELLO_MSG_PREFIX "xnode-ok-"
+
+extern char *__progname;
+
+static void set_if_exists(unordered_map<string, string> &map, const string &value, json &cfg, const string &def)
+{
+	if (cfg.find( value ) == cfg.end()) {
+		map[value] = def;
+	} else {
+		map[value] = cfg[value];
+	}
+}
+
 /**
  * VXSLOT
  */
@@ -297,16 +314,6 @@ XSlot::XSlot(const string &name,
 	this->flags = flags;
 }
 
-static void rs_from_json(ResultSet& rs, const json& j) {
-	for(auto elm : j) {
-		vector<string> row;
-		for(auto str : elm) {
-			row.push_back(str);
-		}
-		rs.push_back(row);
-	}
-}
-
 static void print_rs(ResultSet &rs) {
 	for(auto row : rs) {
 		for(auto &slot : row) {
@@ -317,22 +324,14 @@ static void print_rs(ResultSet &rs) {
 	cout.flush();
 }
 
-static void assert_rs(ResultSet &rs, ResultSet &rs_expected) {
-	assert(rs.size() == rs_expected.size());
-	for(auto row_id : range(0, rs.size())) {
-		assert(rs[row_id].size() == rs_expected[row_id].size());
-		for(auto slot_id : range(0, rs[row_id].size())) {
-			assert(rs[row_id][slot_id].size() == rs_expected[row_id][slot_id].size());
-			assert(rs[row_id][slot_id] == rs_expected[row_id][slot_id]);
-		}
-	}
-}
-
 /**
  * XTYPE
  */
 
 class XType {
+
+	unordered_map <string, shared_ptr<XType> > *types = nullptr;
+
 	public:
 		int size = 0;
 		string fmt;
@@ -344,16 +343,26 @@ class XType {
 		bool capture_needed = false;
 
 
-		XType(const string &name, int size, const string &fmt="", xray_fmt_type_cb fmt_cb=nullptr);
+		XType(unordered_map <string, shared_ptr<XType> > *types,
+			  const string &name,
+			  int size,
+			  const string &fmt="",
+			  xray_fmt_type_cb fmt_cb=nullptr);
 		void add_slot(const string &name, int offset, int size, const string &type, bool is_pointer=false, int array_size=0, int flags=0);
 		void add_vslot(const string &name, xray_vslot_fmt_cb fmt_cb, xray_vslot_args_t *args);
 };
 
-XType::XType(const string &name, int size, const string &fmt, xray_fmt_type_cb fmt_cb) {
+XType::XType(unordered_map <string, shared_ptr<XType> > *types,
+			 const string &name,
+			 int size,
+			 const string &fmt,
+			 xray_fmt_type_cb fmt_cb)
+{
 	this->name = name;
 	this->size = size;
 	this->fmt = fmt;
 	this->fmt_cb = fmt_cb;
+	this->types = types;
 }
 
 static uint32_t get_current_timestamp() {
@@ -406,8 +415,8 @@ void XType::add_slot(const string &name,
 					 int array_size,
 					 int flags)
 {
-	auto found_slot_type = types.find(slot_type_str);
-	if(found_slot_type == types.end())
+	auto found_slot_type = types->find(slot_type_str);
+	if(found_slot_type == types->end())
 		throw invalid_argument("cannot find type '" + slot_type_str + "'");
 	if(size != found_slot_type->second->size && found_slot_type->second->fmt_cb == NULL)
 		throw invalid_argument("size of slot, isn't same as of xtype.");
@@ -463,6 +472,8 @@ class XPathNode {
 		shared_ptr<XType> xtype = nullptr;
 		XNode *xnode;
 		weak_ptr<XPathNode> self;
+		weak_ptr<XPathNode> father_node;
+		string name;
 
 		uint32_t last_capture_ts = 0;
 
@@ -470,9 +481,7 @@ class XPathNode {
 		xray_iterator iterator_cb = nullptr;
 		int n_rows = 0;
 
-		XPathNode(const string &xpath_str,
-				  int n_rows,
-				  XNode *xnode = nullptr);
+		XPathNode(const string &xpath_str, XNode *xnode=nullptr);
 
 		vector<string> dump_son_names();
 		shared_ptr<ResultSet> xdump();
@@ -482,9 +491,6 @@ class XPathNode {
 	private:
 		/* rate calculation */
 		unordered_map<string, capture_t> captures;
-
-		string name;
-		weak_ptr<XPathNode> father_node;
 
 		XPathNode& parse_path_str(const string &xpath_str);
 		void xdump_xobj(shared_ptr<ResultSet> &rs);
@@ -637,20 +643,11 @@ shared_ptr<ResultSet> XPathNode::xdump() {
 }
 
 XPathNode::XPathNode(const string &xpath_str,
-					 int n_rows,
-					 XNode *xnode) {
+					 XNode *xnode)
+{
 	this->name = xpath_str;
-	this->n_rows = n_rows;
 	this->xnode = xnode;
 }
-
-static void register_type(shared_ptr<XType> xtype) {
-	auto found = types.find(xtype->name);
-	if(found != types.end())
-		throw invalid_argument("cannot register type, type already exists:'" + xtype->name + "'");
-	types[xtype->name] = xtype;
-}
-
 
 /**
  * XOBJ
@@ -666,7 +663,6 @@ class XObj {
 
 void XNode::destroy() {
 	root_xpath = nullptr;
-	xobj_to_path.clear();
 }
 
 shared_ptr<ResultSet> XNode::xdump(const string &xpath) {
@@ -680,7 +676,88 @@ shared_ptr<ResultSet> XNode::xdump(const string &xpath) {
     return father_xpnode->xdump();
 }
 
-//TODO: if xclient started, cannot add or lock and add
+void XNode::register_basic_types(void) {
+	register_type(make_shared<XType>(&types, "uint8_t", sizeof(uint8_t), "%hhu"));
+	register_type(make_shared<XType>(&types, "uint16_t", sizeof(uint16_t), "%hu"));
+	register_type(make_shared<XType>(&types, "uint32_t", sizeof(uint32_t), "%u"));
+	register_type(make_shared<XType>(&types, "uint64_t", sizeof(uint64_t), "%llu"));
+
+	register_type(make_shared<XType>(&types, "int8_t", sizeof(uint8_t), "%hhd"));
+	register_type(make_shared<XType>(&types, "int16_t", sizeof(uint16_t), "%hd"));
+	register_type(make_shared<XType>(&types, "int32_t", sizeof(uint32_t), "%d"));
+	register_type(make_shared<XType>(&types, "int64_t", sizeof(uint64_t), "%lld"));
+
+	register_type(make_shared<XType>(&types, "char", sizeof(char), "%c"));
+	register_type(make_shared<XType>(&types, "short", sizeof(short), "%hd"));
+	register_type(make_shared<XType>(&types, "short int", sizeof(short int), "%hd"));
+	register_type(make_shared<XType>(&types, "int", sizeof(int), "%d"));
+	register_type(make_shared<XType>(&types, "long", sizeof(long), "%ld"));
+	register_type(make_shared<XType>(&types, "long int", sizeof(long int), "%ld"));
+	register_type(make_shared<XType>(&types, "long long", sizeof(long long), "%lld"));
+	register_type(make_shared<XType>(&types, "long long int", sizeof(long long int), "%lld"));
+
+	register_type(make_shared<XType>(&types, "unsigned short", sizeof(short), "%hu"));
+	register_type(make_shared<XType>(&types, "unsigned short int", sizeof(short int), "%hu"));
+	register_type(make_shared<XType>(&types, "unsigned int", sizeof(int), "%u"));
+	register_type(make_shared<XType>(&types, "unsigned long", sizeof(long), "%lu"));
+	register_type(make_shared<XType>(&types, "unsigned long int", sizeof(long int), "%lu"));
+	register_type(make_shared<XType>(&types, "unsigned long long", sizeof(long long), "%llu"));
+	register_type(make_shared<XType>(&types, "unsigned long long int", sizeof(long long int), "%llu"));
+
+	register_type(make_shared<XType>(&types, "c_string_t", sizeof(c_string_t), "", xray_string_fmt));
+	register_type(make_shared<XType>(&types, "c_p_string_t", sizeof(c_p_string_t), "", xray_p_string_fmt));
+}
+
+
+XNode::XNode() {
+	register_basic_types();
+}
+
+void XNode::register_type(shared_ptr<XType> xtype) {
+	auto found = types.find(xtype->name);
+	if(found != types.end())
+		throw invalid_argument("cannot register type, type already exists:'" + xtype->name + "'");
+	types[xtype->name] = xtype;
+}
+
+shared_ptr<XPathNode> XNode::find_path_node(const string &xpath_str,
+											bool create_path)
+{
+	auto father_xpnode = root_xpath;
+	for(auto &xpath_seg : xpath_to_seg(xpath_str)) {
+		if(xpath_seg == "")
+			continue;
+		auto xpath_node_res = father_xpnode->sons.find(xpath_seg);
+		if(xpath_node_res == father_xpnode->sons.end()) {
+			if(create_path) {
+				auto xpnode = make_shared<XPathNode>(xpath_seg, this);
+				father_xpnode->sons[xpath_seg] = xpnode;
+				xpnode->self = xpnode;
+				xpnode->father_node = father_xpnode;
+				father_xpnode = xpnode;
+			} else {
+				throw PathNotExistsError();
+			}
+		} else {
+			father_xpnode = xpath_node_res->second;
+		}
+	}
+	return father_xpnode;
+}
+
+void XNode::xdelete(const string &xpath_str) {
+	auto pnode = find_path_node(xpath_str, false);
+	auto father_pnode = pnode->father_node;
+	do {
+		if(pnode->sons.size() == 0) {
+			shared_ptr<XPathNode>(father_pnode)->sons.erase(pnode->name);
+		}
+		pnode = shared_ptr<XPathNode>(father_pnode);
+		father_pnode = pnode->father_node;
+	} while(father_pnode.use_count() != 0);
+}
+
+
 void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &xtype_str, xray_iterator iterator_cb) {
 	auto xtype = types.find(xtype_str);
 	if(xobj == nullptr)
@@ -700,90 +777,14 @@ void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &
 	if(is_cap_needed && !is_pk_exists)
 		throw invalid_argument("cannot add xobj, type '" + xtype_str + "' has rate enabled but no PK");
 
-	auto father_xpnode = root_xpath;
-	for(auto &xpath_seg : xpath_to_seg(xpath_str)) {
-		if(xpath_seg == "")
-			continue;
-		auto xpath_node_res = father_xpnode->sons.find(xpath_seg);
-		if(xpath_node_res == father_xpnode->sons.end()) {
-			auto xpnode = make_shared<XPathNode>(xpath_seg, n_rows, this);
-			father_xpnode->sons[xpath_seg] = xpnode;
-			xpnode->self = xpnode;
-			father_xpnode = xpnode;
-		} else {
-			father_xpnode = xpath_node_res->second;
-		}
-	}
-	father_xpnode->xobj = xobj;
-	father_xpnode->xtype = xtype->second;
-	father_xpnode->n_rows = n_rows;
-	father_xpnode->iterator_cb = iterator_cb;
-	xobj_to_path[xobj] = xpath_str;
+	auto pnode = find_path_node(xpath_str, true);
+
+	pnode->xobj = xobj;
+	pnode->xtype = xtype->second;
+	pnode->n_rows = n_rows;
+	pnode->iterator_cb = iterator_cb;
 }
 
-static int xray_string_fmt(void *slot, char *output_str) {
-	return snprintf(output_str, XRAY_MAX_SLOT_STR_SIZE, "%s", (char *)slot);
-}
-
-static int xray_p_string_fmt(void *slot, char *output_str) {
-	c_p_string_t str = (c_p_string_t)slot;
-	return snprintf(output_str, XRAY_MAX_SLOT_STR_SIZE, "%s", *str);
-}
-
-static void register_basic_types(void) {
-	register_type(make_shared<XType>("uint8_t", sizeof(uint8_t), "%hhu"));
-	register_type(make_shared<XType>("uint16_t", sizeof(uint16_t), "%hu"));
-	register_type(make_shared<XType>("uint32_t", sizeof(uint32_t), "%u"));
-	register_type(make_shared<XType>("uint64_t", sizeof(uint64_t), "%llu"));
-
-	register_type(make_shared<XType>("int8_t", sizeof(uint8_t), "%hhd"));
-	register_type(make_shared<XType>("int16_t", sizeof(uint16_t), "%hd"));
-	register_type(make_shared<XType>("int32_t", sizeof(uint32_t), "%d"));
-	register_type(make_shared<XType>("int64_t", sizeof(uint64_t), "%lld"));
-
-	register_type(make_shared<XType>("char", sizeof(char), "%c"));
-	register_type(make_shared<XType>("short", sizeof(short), "%hd"));
-	register_type(make_shared<XType>("short int", sizeof(short int), "%hd"));
-	register_type(make_shared<XType>("int", sizeof(int), "%d"));
-	register_type(make_shared<XType>("long", sizeof(long), "%ld"));
-	register_type(make_shared<XType>("long int", sizeof(long int), "%ld"));
-	register_type(make_shared<XType>("long long", sizeof(long long), "%lld"));
-	register_type(make_shared<XType>("long long int", sizeof(long long int), "%lld"));
-
-	register_type(make_shared<XType>("unsigned short", sizeof(short), "%hu"));
-	register_type(make_shared<XType>("unsigned short int", sizeof(short int), "%hu"));
-	register_type(make_shared<XType>("unsigned int", sizeof(int), "%u"));
-	register_type(make_shared<XType>("unsigned long", sizeof(long), "%lu"));
-	register_type(make_shared<XType>("unsigned long int", sizeof(long int), "%lu"));
-	register_type(make_shared<XType>("unsigned long long", sizeof(long long), "%llu"));
-	register_type(make_shared<XType>("unsigned long long int", sizeof(long long int), "%llu"));
-
-	xray_create_type(c_string_t, xray_string_fmt);
-	xray_create_type(c_p_string_t, xray_p_string_fmt);
-}
-
-static string create_node_id(const string &hostname, const string &nodename,
-					  	     const string &node_index, const string &key) {
-	string s = {nodename + ":" + node_index + ":" + key + ":" + hostname};
-	return s;
-}
-
-#define XRAY_CFG_ENV "XRAY_CONFIG"
-#define XRAYIO_HOST "www.xrayio.com"
-#define XRAYIO_PORT "40001"
-
-#define HELLO_MSG_PREFIX "xnode-ok-"
-
-extern char *__progname;
-
-static void set_if_exists(unordered_map<string, string> &map, const string &value, json &cfg, const string &def)
-{
-	if (cfg.find( value ) == cfg.end()) {
-		map[value] = def;
-	} else {
-		map[value] = cfg[value];
-	}
-}
 
 void XClient::get_cfg(const string &api_key) {
 	char *env = getenv(XRAY_CFG_ENV);
@@ -1061,6 +1062,9 @@ void XClient::_start() {
 			try {
 				expire_captures();
 				auto socket = rx(query, req_id, ts, widget_id);
+
+				lock_guard<mutex> lock(back_end_lock);
+
 				auto rs = handle_query(query);
 				tx(socket, *rs, req_id, ts, 0, widget_id);
 			} catch (const quit_err &e) {
@@ -1085,227 +1089,6 @@ void XClient::start() {
 	xclient_thread = new thread([this] { this->_start(); });
 }
 
-/**
- * TESTS
- */
-
-#include <stdint.h>
-
-#define slot_metadata(container, slot_name) #slot_name, offsetof(container, slot_name), sizeof(((container *)0)->slot_name)
-typedef struct test_basic_fmt {
-	uint8_t  a_uint8_t;
-	uint16_t a_uint16_t;
-	uint32_t a_uint32_t;
-	uint64_t a_uint64_t;
-	int8_t  a_int8_t;
-	int16_t a_int16_t;
-	int32_t a_int32_t;
-	int64_t a_int64_t;
-} test_struct_t;
-
-typedef struct test_simple {
-	int a;
-} test_simple_t;
-
-
-static void basic_test_fmt() {
-	XNode xnode;
-	test_struct_t ts = {0xf0, 0xf000, 0xf0000000, 0xf000000000000000,
-						(int8_t)0xf0, (int16_t)0xf000,
-						(int32_t)0xf0000000, (int64_t)0xf000000000000000};
-	shared_ptr<XType> xtype = make_shared<XType>("test_basic_fmt", sizeof(test_basic_fmt));
-	xtype->add_slot(slot_metadata(test_struct_t, a_uint8_t), "uint8_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_uint16_t), "uint16_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_uint32_t), "uint32_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_uint64_t), "uint64_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_int8_t), "int8_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_int16_t), "int16_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_int32_t), "int32_t");
-	xtype->add_slot(slot_metadata(test_struct_t, a_int64_t), "int64_t");
-
-	register_type(xtype);
-
-	xnode.xadd(&ts, 1, "/basic/test", "test_basic_fmt");
-	auto rs = xnode.xdump("/basic/test");
-	ResultSet exp_rs = {{"uint8_t", "uint16_t", "uint32_t", "uint64_t",
-						 "int8_t", "int16_t", "int32_t", "int64_t"},
-						{"240", "61440", "4026531840", "17293822569102704640",
-						 "-16", "-4096", "-268435456", "-1152921504606846976"}};
-	assert_rs(*rs, exp_rs);
-}
-
-static void basic_test_array(XNode &xnode) {
-	test_simple_t ts[] = {1,2,3,4,5};
-	xnode.xadd(&ts, sizeof(ts)/sizeof(test_simple_t), "/test_array", "test_dirs_t");
-	auto rs = xnode.xdump("/test_array");
-	ResultSet exp_rs = {{"a"}, {"1"}, {"1"}, {"1"}, {"1"}, {"1"}};
-	assert_rs(*rs, exp_rs);
-}
-
-static void basic_test_dirs()
-{
-	XNode xnode;
-	test_simple_t ts = {1};
-	shared_ptr<XType> xtype = make_shared<XType>("test_dirs_t", sizeof(test_simple_t));
-	xtype->add_slot(slot_metadata(test_simple_t, a), "int");
-	register_type(xtype); //TODO: register on type create?
-
-	//TODO: use macro, and check that size of struct is equal to struct of xtype
-	xnode.xadd(&ts, 1, "/dir/test1", "test_dirs_t");
-	xnode.xadd(&ts, 1, "/dir/test2", "test_dirs_t");
-	xnode.xadd(&ts, 1, "/dir/test3", "test_dirs_t");
-	auto rs = xnode.xdump("/dir");
-	ResultSet exp_rs = {{"dir"}, {"test1"}, {"test2"}, {"test3"}};
-	assert_rs(*rs, exp_rs);
-
-	auto rs_root = xnode.xdump("/");
-	ResultSet exp_rs_root = {{"dir"}, {"dir"}};
-	assert_rs(*rs_root, exp_rs_root);
-	basic_test_array(xnode);
-}
-
-static void test_xclient() {
-	XClient xclient("test-key");
-	test_simple_t ts = {1};
-
-	auto &xnode = xclient.xnode;
-	xnode.xadd(&ts, 1, "/dir/test1", "test_dirs_t");
-	xnode.xadd(&ts, 1, "/dir/test2", "test_dirs_t");
-	xnode.xadd(&ts, 1, "/dir/test3", "test_dirs_t");
-
-	auto rs = xclient.handle_query("/dir/test1");
-	ResultSet exp_rs = {{"a"} ,{"1"}};
-	assert_rs(*rs, exp_rs);
-
-	auto rs_ping = xclient.handle_query("/..ping");
-	ResultSet exp_rs_pong = {{"pong"}};
-	assert_rs(*rs_ping, exp_rs_pong);
-}
-
-
-static string s_recv(zmq::socket_t &socket) {
-	zmq::message_t message;
-	socket.recv(&message);
-	auto res = string(static_cast<char*>(message.data()), message.size());
-	return res;
-}
-
-
-struct XServer_simulate {
-	zmq::context_t ctx = zmq::context_t(1);
-	zmq::socket_t res = zmq::socket_t(ctx, zmq::socket_type::router);
-
-	string node_id;
-
-	XServer_simulate();
-	void recv(string &rs_json_str);
-	void send(const string &query);
-};
-
-XServer_simulate::XServer_simulate() {
-	//xray_server_socket.bind("tcp://*:" + to_string(XNODE_SERVER_PORT));
-}
-
-void XServer_simulate::recv(string &rs_json_str) {
-	node_id = s_recv(res);
-	string empty = s_recv(res);
-	rs_json_str = s_recv(res);
-}
-
-void XServer_simulate::send(const string &query) {
-	vector<string> req = {"123", query, "123"};
-	json json = req;
-	auto json_str = json.dump();
-	res.send(node_id.c_str(), node_id.size(), ZMQ_SNDMORE);
-	res.send(json_str.c_str(), json_str.size());
-}
-
-static void test_full_xclient() {
-	XClient xclient = XClient("a");
-	string rs_json_str;
-
-	test_simple_t ts = {17};
-	xclient.xnode.xadd(&ts, 1, "/test_full_xclient", "test_dirs_t");
-	xclient.start();
-
-	XServer_simulate xserv = XServer_simulate();
-
-
-	/* hello message */
-	xserv.recv(rs_json_str);
-	auto req = json::parse(rs_json_str);
-	string hello_rs = req[1][0][0];
-	assert(hello_rs.substr(0, sizeof(HELLO_MSG_PREFIX)-1) == HELLO_MSG_PREFIX);
-
-	/* request */
-	xserv.send("/test_full_xclient");
-	xserv.recv(rs_json_str);
-	auto response_dir = json::parse(rs_json_str);
-	ResultSet rs = response_dir[1];
-	ResultSet exp_rs = {{"a"}, {"17"}};
-	assert_rs(rs, exp_rs);
-
-	/* quit */
-	xserv.send("/..quit");
-	xclient.xclient_thread->join();
-}
-
-static void test_xclient_timeout() {
-	XClient xclient("test-key");
-	string rs_json_str;
-
-	test_simple_t ts = {17};
-	xclient.xnode.xadd(&ts, 1, "/test_full_xclient", "test_dirs_t");
-	xclient.rx_timeout = 900;
-	xclient.init_socket();
-	xclient.start();
-
-	XServer_simulate xserv = XServer_simulate();
-
-	/* hello message */
-	xserv.recv(rs_json_str);
-	sleep(1);
-	xserv.recv(rs_json_str);
-	/* request */
-	xserv.send("/test_full_xclient");
-	xserv.recv(rs_json_str);
-	auto response_dir = json::parse(rs_json_str);
-	ResultSet rs = response_dir[1];
-	ResultSet exp_rs = {{"a"}, {"17"}};
-	assert_rs(rs, exp_rs);
-}
-
-static void run_tests() {
-	register_basic_types();
-	basic_test_fmt();
-	basic_test_dirs();
-
-	test_xclient();
-	test_full_xclient();
-	test_xclient_timeout();
-	types.clear();
-}
-#if 0
-int main(int argc, char **argv) {
-	if(argc == 2) {
-		run_tests();
-	} else {
-		register_basic_types();
-		test_simple_t ts = {1};
-
-		shared_ptr<XType> xtype = make_shared<XType>("test_dirs_t");
-		xtype->add_slot(slot_metadata(test_simple_t, a), "int");
-		register_type(xtype); //TODO: register on type create?
-
-		XClient xclient;
-		xclient.xnode.xadd(&ts, 1, "/my_test", "test_dirs_t");
-		xclient.start();
-		while(true)
-			sleep(1);
-	}
-}
-#endif
-
 /***
  * C API
  */
@@ -1322,7 +1105,6 @@ static void xray_is_initiated(void)
 
 int xray_init(const char *api_key) {
 	try {
-		register_basic_types();
 		c_xclient = new XClient(api_key);
 		c_xclient->start();
 		return c_xclient != nullptr;
@@ -1334,8 +1116,11 @@ int xray_init(const char *api_key) {
 
 void *_xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb) {
 	try {
-		auto new_type = make_shared<XType>(type_name, size, "", fmt_type_cb);
-		register_type(new_type);
+		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+
+		auto new_type = make_shared<XType>(&c_xclient->xnode.types, type_name, size, "", fmt_type_cb);
+		c_xclient->xnode.register_type(new_type);
 		return (void *)new_type.get();
 	} catch(exception &ex) {
 		cout << "ERROR: add_vslot. resaon: " << ex.what() << endl;
@@ -1352,6 +1137,8 @@ int _xray_add_slot(void *type,
 				   int flags) {
 	try {
 		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+
 		auto new_type = static_cast<XType *>(type);
 		if(type == nullptr)
 			throw runtime_error{"type should not be null"};
@@ -1373,8 +1160,9 @@ int xray_add_vslot(void *type, const char *vslot_name, xray_vslot_fmt_cb fmt_cb)
 	int rc = 0;
 	try {
 		xray_is_initiated();
-		auto new_type = static_cast<XType *>(type);
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
 
+		auto new_type = static_cast<XType *>(type);
 		if(type == nullptr)
 			throw runtime_error{"type should not be null"};
 		if(vslot_name == nullptr)
@@ -1392,6 +1180,8 @@ int _xray_register(const char *type, void *obj, const char *path, int n_rows, xr
 
 	try {
 		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+
 		c_xclient->xnode.xadd(obj, n_rows, path, type, iterator_cb);
 		return 0;
 	} catch(exception &ex) {
@@ -1400,9 +1190,17 @@ int _xray_register(const char *type, void *obj, const char *path, int n_rows, xr
 	return -1;
 }
 
-void xray_dump(const char *path) {
-	auto rs = c_xclient->xnode.xdump(path);
-	print_rs(*rs);
+int xray_unregister(const char *path) {
+	try {
+		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+
+		c_xclient->xnode.xdelete(path);
+		return 0;
+	} catch(exception &ex) {
+		cout << "ERROR: register. reason: "<< ex.what() << endl;
+	}
+	return -1;
 }
 
 int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
@@ -1410,6 +1208,9 @@ int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
 	int rc = 0;
 	try {
 		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+
+		auto &types = c_xclient->xnode.types;
 		auto xtype = types.find(type_name);
 		string str_type_name = type_name;
 		if(xtype == types.end())

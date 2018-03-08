@@ -6,6 +6,8 @@ import os
 import zmq
 from tabulate import tabulate
 from pandas import DataFrame
+import json
+
 
 class MsgToXnode(object):
     REQ_ID = 0
@@ -46,6 +48,7 @@ def humanize_number(value, fraction_point=1):
 
     return return_value
 
+
 class XrayCli(object):
     XRAY_NODES_PATH = '/tmp/xray/'
 
@@ -71,7 +74,7 @@ class XrayCli(object):
         self.request.setsockopt(zmq.SNDTIMEO, 1000)
         self.request.connect('ipc://{}/{}'.format(self.XRAY_NODES_PATH, node))
 
-    def send_recv(self, node, msg):
+    def send_recv(self, node, msg, fmt):
         self.init_socket(node)
 
         # print(">SEND ", node, ": ", msg.to_json())
@@ -80,9 +83,12 @@ class XrayCli(object):
         node_id = self.request.recv_string(encoding='ascii')
         msg = self.request.recv_json()
         # print("<RECV", msg)
-        return msg["result_set"]
+        if fmt == 'json':
+            return msg
+        else:
+            return msg["result_set"]
 
-    def get_result_set(self, full_xpath):
+    def get_result_set(self, full_xpath, fmt):
         if full_xpath == '/':
             return self.nodes_list
         if full_xpath[-1] != "/":
@@ -90,7 +96,7 @@ class XrayCli(object):
         node, node_xpath = full_xpath.split('/', 2)[1:]
         if node_xpath == '':
             node_xpath = "/"
-        return self.send_recv(node, MsgToXnode(node_xpath))
+        return self.send_recv(node, MsgToXnode(node_xpath), fmt)
     
     def humanize_column(self, column):
         return [humanize_number(int(value)) for value in column]
@@ -100,14 +106,17 @@ class XrayCli(object):
         rate_columns = [column for column in columns if column.endswith("-rate")]
         df[rate_columns] = df[rate_columns].apply(self.humanize_column)
         
-    def run(self, full_xpath, query):
-        result_set = self.get_result_set(full_xpath)
+    def run(self, full_xpath, query, fmt):
+        result_set = self.get_result_set(full_xpath, fmt)
         
-        df = DataFrame.from_records(result_set[1:], columns=result_set[0])
-        self.huminify_rates(df)
-        if query:
-            df = df.query(query)
-        print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
+        if fmt == 'json':
+            print(json.dumps(result_set))
+        else:
+            df = DataFrame.from_records(result_set[1:], columns=result_set[0])
+            self.huminify_rates(df)
+            if query:
+                df = df.query(query)
+            print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
 
     def close(self):
         try:
@@ -123,6 +132,7 @@ def usage():
 
 
 if __name__ == "__main__":
+    fmt = 'table'
     if len(sys.argv) <= 1:
         usage()
         exit(-1)
@@ -131,7 +141,9 @@ if __name__ == "__main__":
         query = None
         if len(sys.argv) > 2:
             query = " ".join(sys.argv[2:])
-        xcli.run(sys.argv[1], query)
+        if sys.argv[-1] == '--json':
+            fmt = 'json'
+        xcli.run(sys.argv[1], query, fmt)
     finally:
         xcli.close()
 
