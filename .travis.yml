@@ -1,14 +1,14 @@
 language: cpp
 dist: trusy
 sudo: required
-- compiler: gcc
-      addons:
-        apt:
+compiler: gcc
+addons:
+      apt:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - g++-5
-      env: CXX=g++-5
+            - g++-5.4
+      env: CXX=g++-5.4
 os: linux
 python: "2.7"
 before_install:
