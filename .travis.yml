@@ -8,6 +8,6 @@ before_install:
 - sudo apt-get update
 install:
 - sudo apt-get install libzmq-dev
-- make xraycli
+- sudo make xraycli
 script:
 - make test
