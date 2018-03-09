@@ -7,13 +7,13 @@ addons:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - g++-5.4
-      env: COMPILER=g++-5.4
+            - g++-5
+      env: COMPILER=g++-5
 os: linux
 python: "2.7"
 before_install:
 - sudo make init-ubuntu14.04
 - sudo make xraycli
-- g++-5.4 --version
+- g++-5 --version
 script:
 - make CXX=$COMPILER test
