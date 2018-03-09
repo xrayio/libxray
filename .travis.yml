@@ -14,5 +14,6 @@ python: "2.7"
 before_install:
 - sudo make init-ubuntu14.04
 - sudo make xraycli
+- g++-5.4 --version
 script:
-- make test
+- make CXX=$COMPILER test
