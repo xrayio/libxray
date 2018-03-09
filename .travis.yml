@@ -1,18 +1,19 @@
 language: cpp
 dist: trusy
 sudo: required
-compiler: gcc
-addons:
-      apt:
+- compiler: gcc
+      addons:
+        apt:
           sources:
             - ubuntu-toolchain-r-test
           packages:
-            - g++-5.4
-      env: CXX=g++-5.4
+            - g++-5
+            - gcc-5
+      env: COMPILER=g++-5
 os: linux
 python: "2.7"
 before_install:
 - sudo make init-ubuntu14.04
 - sudo make xraycli
 script:
-- CXX=/usr/bin/g++-5.4 make test
+- make test
