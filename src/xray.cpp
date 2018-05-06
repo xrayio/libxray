@@ -1111,7 +1111,7 @@ int xray_init(const char *api_key) {
 	} catch(exception &ex) {
 		cout << "ERROR: xray_int. reason: " << ex.what() << endl;
 	}
-	return 1;
+	return 0;
 }
 
 void *_xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb) {
