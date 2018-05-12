@@ -37,15 +37,16 @@ extern "C"
 
 	typedef int64_t (*xray_vslot_fmt_cb)(void *row, xray_vslot_args_t *vslot_args);
 	typedef int (*xray_fmt_type_cb)(void *slot, char *out_str);
-	typedef void * (*xray_iterator)(void *start, uint8_t *state, void *mem);
+	typedef void * (*xray_iterator)(void *container, uint8_t *state, void *mem);
 
 	/* prototypes */
 	int xray_init(const char *api_key);
-	void *_xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb);
-	int _xray_add_slot(void *type, const char *slot_name, int offset, int size, const char *slot_type, int is_pointer, int arr_size, int flags);
-	int xray_add_vslot(void *type, const char *vslot_name, xray_vslot_fmt_cb fmt_cb);
+	int _xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb);
+	int _xray_add_slot(const char *type_name, const char *slot_name, int slot_offset, int slot_size, const char *slot_type, int is_pointer, int arr_size, int flags);
+	int _xray_add_vslot(const char *type_name, const char *vslot_name, xray_vslot_fmt_cb fmt_cb);
 	int _xray_register(const char *type, void *obj, const char *path, int n_rows, xray_iterator iterator_cb);
 	int xray_unregister(const char *path);
+	int xray_dump(const char *path, char **out_str);
 
 	/* UTILS */
 	/* Adding two rows of same type */
@@ -64,8 +65,10 @@ extern "C"
 
 	#define xray_create_type(container, fmt_type_cb) \
 		_xray_create_type(#container, sizeof(container), fmt_type_cb)
-	#define xray_add_slot(type, cont, slot, slot_type, flags) \
-		_xray_add_slot(type, #slot, offsetof(cont, slot), member_size(cont, slot), #slot_type, 0, 0, flags)
+	#define xray_add_slot(container, slot, slot_type, flags) \
+		_xray_add_slot(#container, #slot, offsetof(container, slot), member_size(container, slot), #slot_type, 0, 0, flags)
+    #define xray_add_vslot(container, slot_name, slot_fmt_cb) \
+		_xray_add_vslot(#container, slot_name, slot_fmt_cb)
 
 #ifdef __cplusplus
 }

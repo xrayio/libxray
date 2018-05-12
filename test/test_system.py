@@ -5,6 +5,7 @@ from subprocess import check_output, PIPE, Popen
 
 DIST_DIR = os.path.join(os.getenv('XRAY_ROOT'), 'dist')
 
+
 class CannotStartTestApp(Exception):
     pass
 
@@ -44,7 +45,7 @@ class TestApp:
             print(self.test_app.stdout.readlines())
 
 
-class TestXray(unittest.TestCase):
+class SystemTest(unittest.TestCase):
     
     @classmethod
     def setUpClass(cls):
@@ -73,7 +74,6 @@ class TestXray(unittest.TestCase):
         all_paths = self.test_app.run_cmd('/')
         self.assertIn(['/bthis/bis/b/ctest'], all_paths)
         
-        
         self.assertNotIn(['/this/is/a/test/path'], all_paths)
         self.assertNotIn(['/this/is/a/test'], all_paths)
         self.assertNotIn(['/this/is/a'], all_paths)
@@ -82,6 +82,7 @@ class TestXray(unittest.TestCase):
         
         self.assertNotIn(['/bthis/bis/b/btest/bpath'], all_paths)
         self.assertNotIn(['/bthis/bis/b/btest'], all_paths)
-        
+
+
 if __name__ == '__main__':
     unittest.main()

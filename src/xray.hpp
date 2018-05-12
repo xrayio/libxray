@@ -103,6 +103,7 @@ public:
 	// TODO: implement thread stop
 	shared_ptr<ResultSet> handle_query(const string &query);
 	void start();
+	shared_ptr<XType> get_xtype_by_name(const char *type_name);
 };
 
 

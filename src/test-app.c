@@ -68,17 +68,17 @@ register_basic_types()
 
     basic_types[1].p_str = str;
 
-    void *type = xray_create_type(basic_types_t, NULL);
-	xray_add_slot(type, basic_types_t, int8, int8_t, 0);
-	xray_add_slot(type, basic_types_t, uint8, uint8_t, 0);
-	xray_add_slot(type, basic_types_t, int16, int16_t, 0);
-	xray_add_slot(type, basic_types_t, uint16, uint16_t, 0);
-	xray_add_slot(type, basic_types_t, int32, int32_t, 0);
-	xray_add_slot(type, basic_types_t, uint32, uint32_t, 0);
-	xray_add_slot(type, basic_types_t, int64, int64_t, 0);
-	xray_add_slot(type, basic_types_t, uint64, uint64_t, 0);
-	xray_add_slot(type, basic_types_t, str, c_string_t, 0);
-	xray_add_slot(type, basic_types_t, p_str, c_p_string_t, 0);
+    xray_create_type(basic_types_t, NULL);
+	xray_add_slot(basic_types_t, int8, int8_t, 0);
+	xray_add_slot(basic_types_t, uint8, uint8_t, 0);
+	xray_add_slot(basic_types_t, int16, int16_t, 0);
+	xray_add_slot(basic_types_t, uint16, uint16_t, 0);
+	xray_add_slot(basic_types_t, int32, int32_t, 0);
+	xray_add_slot(basic_types_t, uint32, uint32_t, 0);
+	xray_add_slot(basic_types_t, int64, int64_t, 0);
+	xray_add_slot(basic_types_t, uint64, uint64_t, 0);
+	xray_add_slot(basic_types_t, str, c_string_t, 0);
+	xray_add_slot(basic_types_t, p_str, c_p_string_t, 0);
 
     xray_register(basic_types_t, &basic_types, "/basic_types", ARR_DIM(basic_types), NULL);
 }
@@ -87,10 +87,10 @@ register_basic_types()
 static void
 register_test()
 {
-    void *type = xray_create_type(ctest_t, NULL);
-	xray_add_slot(type, ctest_t, id, int, XRAY_FLAG_PK);
-	xray_add_slot(type, ctest_t, rate, int, XRAY_FLAG_RATE);
-	xray_add_vslot(type, "b", add_one);
+    xray_create_type(ctest_t, NULL);
+	xray_add_slot(ctest_t, id, int, XRAY_FLAG_PK);
+	xray_add_slot(ctest_t, rate, int, XRAY_FLAG_RATE);
+	xray_add_vslot(ctest_t, "b", add_one);
 	xray_register(ctest_t, &test_inst, "/a/c", sizeof(test_inst)/sizeof(test_inst[0]), NULL);
 	xray_register(ctest_t, &test_inst, "/rate", 1, NULL);
 
@@ -101,8 +101,8 @@ static void
 register_is_up()
 {
     static is_up_t is_up = {.is_up = "UP"};
-    void *type = xray_create_type(is_up_t, NULL);
-	xray_add_slot(type, is_up_t, is_up, c_p_string_t, 0);
+    xray_create_type(is_up_t, NULL);
+	xray_add_slot(is_up_t, is_up, c_p_string_t, 0);
 
     xray_register(is_up_t, &is_up, "/is_up", 1, NULL);
 }
