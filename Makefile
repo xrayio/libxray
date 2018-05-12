@@ -21,7 +21,7 @@ SYS_INC:=-I/usr/include -I/usr/local/include
 SYS_LIB:=-L//usr/lib/x86_64-linux-gnu/ -L/usr/local/lib
 
 
-.PHONY: all pull debug clean libxray test-app xraycli test test-in-docker
+.PHONY: all pull debug clean libxray libxray-shared test-app xraycli test test-in-docker
 
 all: libxray
 	${Q}echo "\033[32mXRAY: done!\033[0m"
@@ -39,14 +39,15 @@ clean:
 	${Q}rm -rf ${INSTALL_DIR}/*
 
 run-test-app: test-app
-	./dist/test-app
+	LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${INSTALL_DIR} ./dist/test-app
 
 libxray:
-	${Q}g++ -c -g -O2 -I${PKG_INSTALL_DIR} ${SYS_INC} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp
+	g++ -c -g -O2 -I${PKG_INSTALL_DIR} ${SYS_INC} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp
 	${Q}ar rcs ${INSTALL_DIR}/libxray.a ${INSTALL_DIR}/xray.o 
-	${Q}#g++ -shared -o ${INSTALL_DIR}/libxray.so -lzmq -L${INSTALL_DIR} -L/usr/lib/x86_64-linux-gnu/ ${INSTALL_DIR}/xray.o
 	${Q}ln -sf ../${SRC_DIR}/xray.h ${INSTALL_DIR}/xray.h
-	${Q}#gcc -g -O0 -L${INSTALL_DIR} -fsanitize=address -lxray -o ${INSTALL_DIR}/xray-ctest ${SRC_DIR}/xray-c.c
+
+libxray-shared:
+	g++ -shared -g -O0 -I${PKG_INSTALL_DIR} ${SRC_DIR}/xray.cpp ${SYS_INC} -lzmq -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/libxray.so
 
 libxray-debug:
 	${Q}g++ -c -g -O0 -I${PKG_INSTALL_DIR} ${SYS_INC} ${DEBUG_SANITIZE} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp	
@@ -56,12 +57,14 @@ libxray-debug:
 xraycli:
 	${Q} pip install -e .
 
-test-app: libxray-debug
+test-app: libxray-shared
 	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -o ${INSTALL_DIR}/test-app ${SRC_DIR}/test-app.c -lxray -lstdc++ -lzmq
 
 test: test-app xraycli
 	${Q}export XRAY_ROOT=$(abspath ${WORK_DIR}); \
-	python test/xray-test.py
+	python test/test_unit.py
+	${Q}export XRAY_ROOT=$(abspath ${WORK_DIR}); export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${INSTALL_DIR};\
+	python test/test_system.py
 
 test-in-docker:
 	docker-compose -f docker-test.yml up
