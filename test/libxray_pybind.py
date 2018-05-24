@@ -25,7 +25,9 @@ class XrayBind:
 
         self.fn_xray_init = self.libxray.xray_init
         self.fn_xray_init.restype = c_int
-        self.fn_xray_init.argstype = (c_char_p)
+        self.fn_xray_init.argstype = (c_char_p,  # api key
+                                      c_int  # start rx_thread
+        )
 
         self.fn__xray_create_type = self.libxray._xray_create_type
         self.fn__xray_create_type.restype = c_int

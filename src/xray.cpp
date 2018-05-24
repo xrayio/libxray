@@ -1,11 +1,3 @@
-//============================================================================
-// Name        : xray.cpp
-// Author      :
-// Version     :
-// Copyright   : Your copyright notice
-// Description : Hello World in C++, Ansi-style
-// g++ -g -O0 -std=c++14 -o libxray libxraycpp.cpp
-//============================================================================
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -26,11 +18,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <nanomsg/pair.h>
+#include "nn.hpp"
+
 #include "ordered_map.h"
-#define NDEBUG
-#define ZMQ_CPP11
-#include "zmq.h"
-#include "zmq.hpp"
 #include "json.hpp"
 
 #include "xray.hpp"
@@ -845,6 +836,8 @@ XClient::XClient(const string &api_key) {
 
 	if(cfg["debug"] == "true")
 		debug = true;
+
+	should_init_socket = true;
 }
 
 XClient::~XClient() {
@@ -853,14 +846,8 @@ XClient::~XClient() {
 }
 
 void XClient::destroy_socket() {
-	if(xray_server_socket) {
-		xray_server_socket->close();
-		delete xray_server_socket;
-		xray_server_socket = nullptr;
-	}
-
 	if(xray_cli_socket) {
-		xray_cli_socket->close();
+//		xray_cli_socket->shutdown();
 		delete xray_cli_socket;
 		xray_cli_socket = nullptr;
 	}
@@ -869,29 +856,16 @@ void XClient::destroy_socket() {
 void XClient::init_socket() {
 	destroy_socket();
 
-	if(ctx == nullptr)
-		ctx = new zmq::context_t(1);
-
-	if(xray_server_socket == nullptr) {
-//		cout << "Connecting to: " << xray_server_conn << " ..." << endl;
-//		xray_server_socket = new zmq::socket_t(*ctx, zmq::socket_type::dealer);
-
-//		/xray_server_socket->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
-//		xray_server_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
-//		xray_server_socket->setsockopt(ZMQ_IMMEDIATE, 1);
-//		xray_server_socket->connect(xray_server_conn);
-	}
-
 	if(xray_cli_socket == nullptr) {
 		cout << "Binding to: " << xray_cli_conn << " ..." << endl;
-		xray_cli_socket = new zmq::socket_t(*ctx, zmq::socket_type::rep);
-		xray_cli_socket->setsockopt(ZMQ_IDENTITY, node_id.c_str(), node_id.size());
-		//xray_cli_socket->setsockopt(ZMQ_RCVTIMEO, rx_timeout);
-		xray_cli_socket->bind(xray_cli_conn);
+		xray_cli_socket = new nn::socket(AF_SP, NN_PAIR);
+		xray_cli_socket->bind(xray_cli_conn.c_str());
 	}
+
+	should_init_socket = false;
 }
 
-void XClient::_tx(zmq::socket_t *socket,
+void XClient::_tx(nn::socket *socket,
 				  ResultSet &rs,
 				  const string &req_id,
 				  uint64_t ts,
@@ -910,12 +884,11 @@ void XClient::_tx(zmq::socket_t *socket,
 	string res_str = response.dump(-1, ' ', true);
 	if(debug)
 		cout << "sending: " << res_str << endl;
-	socket->send("", 0, ZMQ_SNDMORE);
-	socket->send(res_str.c_str(), res_str.size());
+	socket->send(res_str.c_str(), res_str.size(), 0);
 }
 
 
-void XClient::tx(zmq::socket_t *socket,
+void XClient::tx(nn::socket *socket,
 				 ResultSet &rs,
 				 const string &req_id,
 				 const uint64_t ts,
@@ -925,7 +898,7 @@ void XClient::tx(zmq::socket_t *socket,
 	_tx(socket, rs, req_id, ts, avg_ms, widget_id);
 }
 
-void XClient::tx(zmq::socket_t *socket,
+void XClient::tx(nn::socket *socket,
 		         string &msg,
 				 const string &req_id,
 				 const uint64_t ts,
@@ -935,48 +908,33 @@ void XClient::tx(zmq::socket_t *socket,
 	_tx(socket, rs, req_id, ts, avg_ms);
 }
 
-zmq::socket_t *XClient::rx_socket(zmq::message_t &request) {
-	zmq::message_t m1;
-	zmq::message_t m2;
-	zmq::message_t m3;
+nn::socket *XClient::rx_socket(struct msg &request) {
 
+	int should_block = 0;
+	if(!is_rx_blocking)
+	{
+		should_block = NN_DONTWAIT;
+	}
 
-
-//	zmq::pollitem_t items [] = {
-//		{ (void *) xray_cli_socket, 0, ZMQ_POLLIN, 0 }
-//		{ xray_server_socket, 0, ZMQ_POLLIN, 0 },
-//	};
-
-//	cout << "1" << endl;
-//	zmq::poll (items, 1, -1);
-//	cout << "2" << endl;
-//	if (items [0].revents & ZMQ_POLLIN) {
-		xray_cli_socket->recv(&m1, ZMQ_RCVMORE);
-		auto s1 = string(static_cast<char*>(m1.data()), m1.size());
-		xray_cli_socket->recv(&m2, ZMQ_RCVMORE);
-		auto s2 = string(static_cast<char*>(m2.data()), m2.size());
-		xray_cli_socket->recv(&m3, ZMQ_RCVMORE);
-		auto s3 = string(static_cast<char*>(m3.data()), m3.size());
-		xray_cli_socket->recv(&request);
-		auto s4 = string(static_cast<char*>(request.data()), request.size());
-//	}
-
-//	if (items [1].revents & ZMQ_POLLIN) {
-//		xray_server_socket->recv(&m1, ZMQ_RCVMORE);
-//		xray_server_socket->recv(&m2, ZMQ_RCVMORE);
-//		xray_server_socket->recv(&m3);
-//	}
-		return xray_cli_socket;
+	request.size = xray_cli_socket->recv(&request.data, NN_MSG, should_block);
+	if(request.size < 0) {
+		return nullptr;
+	}
+	return xray_cli_socket;
 }
 
-zmq::socket_t *XClient::rx(string &query, string &req_id, uint64_t &ts, string &widget_id) {
-	zmq::message_t msg_request;
+nn::socket *XClient::rx(string &query, string &req_id, uint64_t &ts, string &widget_id) {
+	msg msg_request;
 
 	auto socket = rx_socket(msg_request);
-
-	string msg_str = string(static_cast<char*>(msg_request.data()), msg_request.size());
+	if(socket == nullptr)
+	{
+		return nullptr;
+	}
+	string msg_str = string(static_cast<char*>(msg_request.data), msg_request.size);
+	nn_freemsg(msg_request.data);
 	if(debug)
-		cout << "XClient recv: " << msg_str << "size " << msg_request.size() << endl;
+		cout << "XClient recv: " << msg_str << endl;
 
 	if(msg_str == "")
 		throw msg_rx_timeout_err();
@@ -1046,51 +1004,60 @@ void XClient::expire_captures() {
 	expire_ts = time;
 }
 
-void XClient::_start() {
-	string hello_msg = HELLO_MSG_PREFIX + node_id;
+void XClient::handle_rxloop()
+{
 	bool cont_rx = true;
-	while(true) {
-		try{
+	try{
+		if(should_init_socket)
 			init_socket();
-			if(xray_server_socket) {
-				tx(xray_server_socket, hello_msg);
+		cont_rx = true;
+	} catch (const exception &e) {
+		cout << "Connect to XRAYIO server failed: " << e.what() << endl;
+		sleep(3);
+		cont_rx = false;
+	}
+
+	while(cont_rx) {
+		time = get_current_timestamp();
+		string req_id = "";
+		uint64_t ts;
+		string query;
+		string widget_id = "";
+		try {
+			expire_captures();
+			auto socket = rx(query, req_id, ts, widget_id);
+			if(socket == nullptr)
+			{
+				if(is_rx_blocking)
+					continue;
+				else
+					break;
 			}
-			cont_rx = true;
-		} catch (const exception &e) {
-			cout << "Connect to XRAYIO server failed: " << e.what() << endl;
-			sleep(3);
+			lock_guard<mutex> lock(back_end_lock);
+
+			auto rs = handle_query(query);
+			tx(socket, *rs, req_id, ts, 0, widget_id);
+		} catch (const quit_err &e) {
+			cout << "Bye bye, received quit" << endl;
 			cont_rx = false;
+		} catch (const cluster_not_exists_err &e) {
+			cout << "Cluster not exists" << endl;
+			return;
+		} catch (const msg_rx_timeout_err &e) {
+			cout << "Rx timeout, reconnecting" << endl;
+			cont_rx = false;
+			should_init_socket = true;
+		} catch (const exception &e) {
+			cout << "Unknown error: " << e.what() << endl;
+			cont_rx = false;
+			should_init_socket = true;
 		}
+	}
+}
 
-		while(cont_rx) {
-			time = get_current_timestamp();
-			string req_id = "";
-			uint64_t ts;
-			string query;
-			string widget_id = "";
-			try {
-				expire_captures();
-				auto socket = rx(query, req_id, ts, widget_id);
-
-				lock_guard<mutex> lock(back_end_lock);
-
-				auto rs = handle_query(query);
-				tx(socket, *rs, req_id, ts, 0, widget_id);
-			} catch (const quit_err &e) {
-				cout << "Bye bye, received quit" << endl;
-				cont_rx = false;
-			} catch (const cluster_not_exists_err &e) {
-				cout << "Cluster not exists" << endl;
-				return;
-			} catch (const msg_rx_timeout_err &e) {
-				cout << "Rx timeout, reconnecting" << endl;
-				cont_rx = false;
-			} catch (const exception &e) {
-				cout << "Unknown error: " << e.what() << endl;
-				cont_rx = false;
-			}
-		}
-
+void XClient::_start() {
+	while(true) {
+		handle_rxloop();
 	}
 }
 
@@ -1112,10 +1079,14 @@ static void xray_is_initiated(void)
 	}
 }
 
-int xray_init(const char *api_key) {
+int xray_init(const char *api_key, int start_rx_thread) {
 	try {
 		c_xclient = new XClient(api_key);
-		c_xclient->start();
+		c_xclient->is_rx_blocking = false;
+		if(start_rx_thread) {
+			c_xclient->is_rx_blocking = true;
+			c_xclient->start();
+		}
 		return c_xclient == nullptr;
 	} catch(exception &ex) {
 		cout << "ERROR: xray_int. reason: " << ex.what() << endl;
@@ -1254,4 +1225,16 @@ int xray_dump(const char *path, char **out_str)
         cout << "ERROR: xray_dump. resaon: "<< ex.what() << endl;
     }
     return -1;
+}
+
+int
+xray_handle_loop()
+{
+	try {
+		c_xclient->handle_rxloop();
+	} catch(exception &ex) {
+        cout << "ERROR: xray handle. resaon: "<< ex.what() << endl;
+        return -1;
+    }
+    return 0;
 }

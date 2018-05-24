@@ -13,9 +13,7 @@
 #include <thread>
 #include <list>
 
-#include <zmq.h>
-#include <zmq.hpp>
-
+#include "nn.hpp"
 #include "xray.h"
 
 using namespace std;
@@ -46,9 +44,17 @@ class XNode {
 };
 
 class XClient {
-	zmq::context_t *ctx = nullptr;
-	zmq::socket_t *xray_server_socket = nullptr;
-	zmq::socket_t *xray_cli_socket = nullptr;
+	struct msg {
+		void *data;
+		int size;
+
+		msg () {
+			data = nullptr;
+			size = 0;
+		}
+	};
+
+	nn::socket *xray_cli_socket = nullptr;
 
 	string node_id;
 	string xray_server_conn;
@@ -61,24 +67,24 @@ class XClient {
 
 	void destroy_socket();
 
-	zmq::socket_t *rx_socket(zmq::message_t &request);
+	nn::socket *rx_socket(struct msg &request);
 
-	zmq::socket_t *rx(string &rs, string &req_id, uint64_t &ts, string &widget_id);
+	nn::socket *rx(string &rs, string &req_id, uint64_t &ts, string &widget_id);
 
-	void _tx(zmq::socket_t *socket,
+	void _tx(nn::socket *socket,
 			 ResultSet &msg,
 			 const string &req_id, uint64_t ts,
 			 int avg_ms,
 			 const string &widget_id="");
 
-	void tx(zmq::socket_t *socket,
+	void tx(nn::socket *socket,
 			ResultSet &rs,
 			const string &req_id="",
 			uint64_t ts=0,
 			int avg_ms=0,
 			const string &widget_id="");
 
-	void tx(zmq::socket_t *socket,
+	void tx(nn::socket *socket,
 			string &msg,
 			const string &req_id="",
 			uint64_t ts=0,
@@ -91,6 +97,8 @@ class XClient {
 public:
 	thread *xclient_thread = nullptr;
 	mutex back_end_lock; // Lock btw back end / front end
+	bool is_rx_blocking;
+	bool should_init_socket;
 
 	/* for tests */
 	int rx_timeout = 30000;
@@ -102,8 +110,9 @@ public:
 	void init_socket();
 	// TODO: implement thread stop
 	shared_ptr<ResultSet> handle_query(const string &query);
-	void start();
 	shared_ptr<XType> get_xtype_by_name(const char *type_name);
+	void start();
+	void handle_rxloop();
 };
 
 
