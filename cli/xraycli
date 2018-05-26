@@ -3,7 +3,10 @@
 import sys
 import os
 
-import zmq
+import warnings
+# supress  UserWarning: Could not load the default wrapper for your platform: cpy, performance may be affected!
+warnings.simplefilter("ignore")
+import nanomsg
 from tabulate import tabulate
 from pandas import DataFrame
 import json
@@ -17,10 +20,10 @@ class MsgToXnode(object):
 
     def to_json(self, ts=0):
         self.REQ_ID += 1
-        return {"req_id": str(self.REQ_ID),
+        return json.dumps({"req_id": str(self.REQ_ID),
                 "widget_id": "xraycli",
                 "query": self.xquery,
-                "timestamp": int(ts)}
+                "timestamp": int(ts)})
 
 
 class NoNodesError(Exception):
@@ -53,7 +56,6 @@ class XrayCli(object):
     XRAY_NODES_PATH = '/tmp/xray/'
 
     def __init__(self):
-        self.ctx = None
         self.request = None
         self.nodes_list = self.get_nodes()
 
@@ -67,11 +69,10 @@ class XrayCli(object):
             return [["NODE"], []]
 
     def init_socket(self, node):
-        self.ctx = zmq.Context()
-        self.request = self.ctx.socket(zmq.REQ)
+        self.request = nanomsg.Socket(nanomsg.PAIR)
         # self.request.setsockopt(zmq.IDENTITY, "xraycli-" + str(os.getpid()))
-        self.request.setsockopt(zmq.RCVTIMEO, 1000)
-        self.request.setsockopt(zmq.SNDTIMEO, 1000)
+        #self.request.setsockopt(zmq.RCVTIMEO, 1000)
+        #self.request.setsockopt(zmq.SNDTIMEO, 1000)
         self.request.connect('ipc://{}/{}'.format(self.XRAY_NODES_PATH, node))
 
     def send_recv(self, node, msg, fmt):
@@ -79,9 +80,9 @@ class XrayCli(object):
 
         # print(">SEND ", node, ": ", msg.to_json())
         # self.request.send(node.encode('ascii'), zmq.SNDMORE)
-        self.request.send_json(msg.to_json())
-        node_id = self.request.recv_string(encoding='ascii')
-        msg = self.request.recv_json()
+        self.request.send(msg.to_json())
+        msg = self.request.recv()
+        msg = json.loads(msg)
         # print("<RECV", msg)
         if fmt == 'json':
             return msg
@@ -121,7 +122,6 @@ class XrayCli(object):
     def close(self):
         try:
             self.request.close()
-            self.ctx.destroy()
         except Exception:
             pass
 

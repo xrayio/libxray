@@ -40,13 +40,16 @@ extern "C"
 	typedef void * (*xray_iterator)(void *container, uint8_t *state, void *mem);
 
 	/* prototypes */
-	int xray_init(const char *api_key);
+	int xray_init(const char *api_key, int start_rx_thread);
 	int _xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type_cb);
 	int _xray_add_slot(const char *type_name, const char *slot_name, int slot_offset, int slot_size, const char *slot_type, int is_pointer, int arr_size, int flags);
 	int _xray_add_vslot(const char *type_name, const char *vslot_name, xray_vslot_fmt_cb fmt_cb);
 	int _xray_register(const char *type, void *obj, const char *path, int n_rows, xray_iterator iterator_cb);
 	int xray_unregister(const char *path);
 	int xray_dump(const char *path, char **out_str);
+	/* handle loop manually */
+	int	xray_handle_loop();
+
 
 	/* UTILS */
 	/* Adding two rows of same type */

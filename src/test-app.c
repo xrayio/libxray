@@ -137,9 +137,23 @@ register_signal_term()
 	sigaction(SIGTERM, &handler, NULL);
 }
 
+#include "pthread.h"
+void *
+xray_loop(void *Args)
+{
+	while(1){
+		xray_handle_loop();
+		sleep(1);
+	}
+	return NULL;
+}
+
 int main() {
 	register_signal_term();
-	xray_init("04BE197BCBC14D8E");
+	xray_init("04BE197BCBC14D8E", 1);
+
+//	pthread_t inc_x_thread;
+//	pthread_create(&inc_x_thread, NULL, xray_loop, NULL);
 
     register_is_up();
     register_test();

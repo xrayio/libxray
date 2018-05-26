@@ -12,7 +12,7 @@ setup(
     version='0',
     packages=find_packages(),
     install_requires=[
-        'zmq',
+        'nanomsg',
         'tabulate',
         'pandas',
     ],

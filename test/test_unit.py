@@ -25,7 +25,7 @@ class SystemTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.libxray = Xray()
-        assert(cls.libxray.init("df") == 0)
+        assert(cls.libxray.init("apikey") == 0)
 
     @classmethod
     def tearDownClass(cls):
