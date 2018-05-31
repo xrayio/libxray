@@ -42,7 +42,7 @@ libxray-shared:
 	g++ -shared -g -O0 -I${PKG_INSTALL_DIR} ${SRC_DIR}/xray.cpp ${SYS_INC} -lnanomsg -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/libxray.so
 
 libxray-debug:
-	${Q}g++ -c -g -O0 -I${PKG_INSTALL_DIR} ${SYS_INC} ${DEBUG_SANITIZE} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp	
+	${Q}g++ -c -g -O0 -I${PKG_INSTALL_DIR} ${SYS_INC} ${DEBUG_SANITIZE} -std=c++11 -fPIC -pthread -o ${INSTALL_DIR}/xray.o ${SRC_DIR}/xray.cpp
 	${Q}ar rcs ${INSTALL_DIR}/libxray.a ${INSTALL_DIR}/xray.o
 	${Q}ln -sf ../${SRC_DIR}/xray.h ${INSTALL_DIR}/xray.h
 
