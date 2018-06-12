@@ -48,7 +48,7 @@ class XrayClient(object):
         try:
             msg = self.request.recv()
         except:
-            self.close_sokcet()
+            self.close_socket()
             raise
         msg = json.loads(msg)
         # print("<RECV", msg)
