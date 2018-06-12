@@ -48,7 +48,7 @@ extern "C"
 	int xray_unregister(const char *path);
 	int xray_dump(const char *path, char **out_str);
 	/* handle loop manually */
-	int	xray_handle_loop();
+	int	xray_handle_loop(void);
 
 
 	/* UTILS */

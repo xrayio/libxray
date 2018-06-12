@@ -3,29 +3,14 @@ from __future__ import unicode_literals
 from __future__ import print_function
 import sys
 import os
-
+from tabulate import tabulate
+from pandas import DataFrame
+import json
 import warnings
 # supress  UserWarning: Could not load the default wrapper for your platform: cpy, performance may be affected!
 warnings.simplefilter("ignore")
 import nanomsg
-from tabulate import tabulate
-from pandas import DataFrame
-import json
-
-
-class MsgToXnode(object):
-    REQ_ID = 0
-
-    def __init__(self, xquery):
-        self.xquery = xquery
-
-    def to_json(self, ts=0):
-        self.REQ_ID += 1
-        return json.dumps({"req_id": str(self.REQ_ID),
-                           "widget_id": "xraycli",
-                           "query": self.xquery,
-                           "timestamp": int(ts)})
-
+from xray_client.XrayClient import XrayClient
 
 class NoNodesError(Exception):
     pass
@@ -55,12 +40,11 @@ def humanize_number(value, fraction_point=1):
 
 class XrayCli(object):
     XRAY_NODES_PATH = '/tmp/xray/'
-
+    
     def __init__(self):
-        self.request = None
         self.nodes_list = self.get_nodes()
-        self.nodes_sockets = {}
-
+        self.nodes = {}
+        
     def get_nodes(self):
         try:
             nodes = os.listdir(self.XRAY_NODES_PATH)
@@ -70,38 +54,18 @@ class XrayCli(object):
         except OSError:
             return [["NODE"], []]
 
-    def init_socket(self, node):
-        node_socket = nanomsg.Socket(nanomsg.PAIR)
-        node_socket.send_timeout = 1000
-        node_socket.recv_timeout = 1000
-        node_socket.connect('ipc://{}/{}'.format(self.XRAY_NODES_PATH, node))
-        self.nodes_sockets[node] = node_socket
-
-    def send_recv(self, node, msg, fmt):
-        if node not in self.nodes_sockets:
-            self.init_socket(node)
-        node_socket = self.nodes_sockets[node]
-
-        # print(">SEND ", node, ": ", msg.to_json())
-        # self.request.send(node.encode('ascii'), zmq.SNDMORE)
-        node_socket.send(msg.to_json())
-        msg = node_socket.recv()
-        msg = json.loads(msg.decode())
-        # print("<RECV", msg)
-        if fmt == 'json':
-            return msg
-        return msg["result_set"]
-
     def get_result_set(self, full_xpath, fmt):
         if full_xpath == '/':
             return self.nodes_list
         if full_xpath[-1] != "/":
             full_xpath += "/"
-        node, node_xpath = full_xpath.split('/', 2)[1:]
+        node_name, node_xpath = full_xpath.split('/', 2)[1:]
         if node_xpath == '':
             node_xpath = "/"
-        return self.send_recv(node, MsgToXnode(node_xpath), fmt)
-
+        if node_name not in self.nodes:
+            self.nodes[node_name] = XrayClient(node_name)
+        return self.nodes[node_name].send_recv(node_xpath, fmt)
+    
     def humanize_column(self, column):
         return [humanize_number(int(value)) for value in column]
 
@@ -111,8 +75,12 @@ class XrayCli(object):
         df[rate_columns] = df[rate_columns].apply(self.humanize_column)
 
     def run(self, full_xpath, query, fmt):
-        result_set = self.get_result_set(full_xpath, fmt)
-
+        try:
+            result_set = self.get_result_set(full_xpath, fmt)
+        except nanomsg.NanoMsgAPIError:
+            print("Timeout. Cannot access path " + full_xpath)
+            return
+        
         if fmt == 'json':
             print(json.dumps(result_set))
         else:
@@ -123,9 +91,9 @@ class XrayCli(object):
             print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
 
     def close(self):
-        for node_socket in self.nodes_sockets:
+        for node in self.nodes:
             try:
-                node_socket.close()
+                node.close_socket()
             except Exception:
                 pass
 
