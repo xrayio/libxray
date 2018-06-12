@@ -10,7 +10,8 @@ from setuptools import find_packages
 setup(
     name='xraycli',
     version='0',
-    packages=find_packages(),
+    package_dir={'':'cli'},
+    packages=find_packages(where="./cli/"),
     install_requires=[
         'nanomsg',
         'tabulate',

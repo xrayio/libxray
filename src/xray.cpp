@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <nanomsg/pair.h>
+#include <nanomsg/reqrep.h>
 #include "nn.hpp"
 
 #include "ordered_map.h"
@@ -858,7 +858,7 @@ void XClient::init_socket() {
 
 	if(xray_cli_socket == nullptr) {
 		cout << "Binding to: " << xray_cli_conn << " ..." << endl;
-		xray_cli_socket = new nn::socket(AF_SP, NN_PAIR);
+		xray_cli_socket = new nn::socket(AF_SP, NN_REP);
 		xray_cli_socket->bind(xray_cli_conn.c_str());
 	}
 
