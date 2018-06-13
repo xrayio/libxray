@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 from __future__ import unicode_literals
 from __future__ import print_function
-import sys
+import click
 import os
 from tabulate import tabulate
 from pandas import DataFrame
@@ -11,6 +11,7 @@ import warnings
 warnings.simplefilter("ignore")
 import nanomsg
 from xray_client.XrayClient import XrayClient
+
 
 class NoNodesError(Exception):
     pass
@@ -40,11 +41,11 @@ def humanize_number(value, fraction_point=1):
 
 class XrayCli(object):
     XRAY_NODES_PATH = '/tmp/xray/'
-    
+
     def __init__(self):
         self.nodes_list = self.get_nodes()
         self.nodes = {}
-        
+
     def get_nodes(self):
         try:
             nodes = os.listdir(self.XRAY_NODES_PATH)
@@ -65,7 +66,7 @@ class XrayCli(object):
         if node_name not in self.nodes:
             self.nodes[node_name] = XrayClient(node_name)
         return self.nodes[node_name].send_recv(node_xpath, fmt)
-    
+
     def humanize_column(self, column):
         return [humanize_number(int(value)) for value in column]
 
@@ -80,7 +81,7 @@ class XrayCli(object):
         except nanomsg.NanoMsgAPIError:
             print("Timeout. Cannot access path " + full_xpath)
             return
-        
+
         if fmt == 'json':
             print(json.dumps(result_set))
         else:
@@ -88,7 +89,12 @@ class XrayCli(object):
             self.huminify_rates(df)
             if query:
                 df = df.query(query)
-            print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
+            if fmt == 'table':
+                print(tabulate(df, headers=df.columns, showindex=False, tablefmt='simple'))
+            else:
+                itable = [(key + ':',) + tuple(val.values())
+                          for key, val in df.to_dict().items()]
+                print(tabulate(itable, showindex=False, tablefmt='plain'))
 
     def close(self):
         for node in self.nodes:
@@ -98,25 +104,20 @@ class XrayCli(object):
                 pass
 
 
-def usage():
-    print("usage:")
-    print("\txraycli <path> <path>... [--json]")
+@click.command()
+@click.option('--format', '-f',
+              default='table',
+              help='The wanted output format',
+              type=click.Choice(['json', 'table', 'itable']))
+@click.argument('paths', required=True, nargs=-1)
+def main(format, paths):
+    xcli = XrayCli()
+    try:
+        for path in paths:
+            xcli.run(path, None, format)
+    finally:
+        xcli.close()
 
 
 if __name__ == "__main__":
-    fmt = 'table'
-    if len(sys.argv) <= 1:
-        usage()
-        exit(-1)
-    xcli = XrayCli()
-    try:
-        if sys.argv[-1] == '--json':
-            fmt = 'json'
-            args = sys.argv[1:-1]
-        else:
-            args = sys.argv[1:]
-
-        for arg in args:
-            xcli.run(arg, None, fmt)
-    finally:
-        xcli.close()
+    main()

@@ -16,6 +16,7 @@ setup(
         'nanomsg',
         'tabulate',
         'pandas',
+        'click',
     ],
     license='MIT',
     scripts=['cli/xraycli']

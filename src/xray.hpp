@@ -115,6 +115,4 @@ public:
 	void handle_rxloop();
 };
 
-
-
 #endif /* SRC_XRAY_HPP_ */
