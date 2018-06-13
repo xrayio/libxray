@@ -33,6 +33,11 @@ typedef struct basic_types {
     char *p_str;
 } basic_types_t;
 
+struct itable_example {
+	int a;
+	int b;
+	int c;
+};
 
 typedef struct ctest {
 	int id;
@@ -81,6 +86,22 @@ register_basic_types()
 	xray_add_slot(basic_types_t, p_str, c_p_string_t, 0);
 
     xray_register(basic_types_t, &basic_types, "/basic_types", ARR_DIM(basic_types), NULL);
+}
+
+static void
+register_itable()
+{
+    	static struct itable_example element = {
+		.a = 1,
+		.b = 2,
+		.c = 3,
+    	};
+    	xray_create_type(struct itable_example, NULL);
+	xray_add_slot(struct itable_example, a, int, 0);
+	xray_add_slot(struct itable_example, b, int, 0);
+	xray_add_slot(struct itable_example, c, int, 0);
+
+    	xray_register_struct(struct itable_example, &element, "/itable");
 }
 
 
@@ -158,6 +179,7 @@ int main() {
     register_is_up();
     register_test();
     register_basic_types();
+    register_itable();
     test_unregister();
 
 	while(exit_test == 0) {

@@ -66,6 +66,9 @@ extern "C"
 	#define xray_register(container, obj, path, n_rows, iterator) \
 		_xray_register(#container, obj, path, n_rows, iterator)
 
+	#define xray_register_struct(container, obj, path)  \
+		xray_register(container, obj, path, 1, NULL)
+
 	#define xray_create_type(container, fmt_type_cb) \
 		_xray_create_type(#container, sizeof(container), fmt_type_cb)
 	#define xray_add_slot(container, slot, slot_type, flags) \
@@ -76,7 +79,5 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-
-
 
 #endif /* SRC_XRAY_H_ */

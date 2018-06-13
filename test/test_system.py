@@ -32,7 +32,7 @@ class TestApp:
         self._start_testapp()
 
     def run_cmd(self, path):
-        result = check_output(['xraycli', '/test-app' + path, '--json'])
+        result = check_output(['xraycli', '-f', 'json', '/test-app' + path])
         js = json.loads(result)
 
         return js['result_set']
