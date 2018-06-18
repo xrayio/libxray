@@ -1,6 +1,7 @@
 import unittest
 import os
 import json
+import time
 from subprocess import check_output, PIPE, Popen
 
 DIST_DIR = os.path.join(os.getenv('XRAY_ROOT'), 'dist')
@@ -83,6 +84,20 @@ class SystemTest(unittest.TestCase):
         self.assertNotIn(['/bthis/bis/b/btest/bpath'], all_paths)
         self.assertNotIn(['/bthis/bis/b/btest'], all_paths)
 
+    def test_rates(self):
+        rates = self.test_app.run_cmd('/rate')
+        time.sleep(1.1)
+        rates = self.test_app.run_cmd('/rate')
+        
+        self.assertNotIn("rate_hidden", set(rates[0]))
+        self.assertIn("rate_hidden-rate", set(rates[0]))
+        self.assertIn("rate", set(rates[0]))
+        self.assertIn("rate-rate", set(rates[0]))
+        rate_rate_index = rates[0].index("rate-rate")
+        rate_hidden_rate_index = rates[0].index("rate_hidden-rate")
+        self.assertAlmostEqual(int(rates[1][rate_rate_index]), 10, delta = 5)
+        self.assertAlmostEqual(int(rates[1][rate_hidden_rate_index]), 10, delta = 5)
 
+    
 if __name__ == '__main__':
     unittest.main()

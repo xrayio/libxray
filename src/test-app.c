@@ -1,10 +1,3 @@
-/*
- * xray-c.c
- *
- *  Created on: 28 Aug 2017
- *      Author: gregory
- */
-
 #include "xray.h"
 
 #include <stdio.h>
@@ -42,6 +35,7 @@ struct itable_example {
 typedef struct ctest {
 	int id;
 	int rate;
+	int rate_hidden;
 } ctest_t;
 
 typedef struct is_up {
@@ -110,7 +104,8 @@ register_test()
 {
     xray_create_type(ctest_t, NULL);
 	xray_add_slot(ctest_t, id, int, XRAY_SLOT_FLAG_PK);
-	xray_add_slot(ctest_t, rate, int, XRAY_SLOT_FLAG_HIDDEN | XRAY_SLOT_FLAG_RATE);
+	xray_add_slot(ctest_t, rate, int, XRAY_SLOT_FLAG_RATE);
+	xray_add_slot(ctest_t, rate_hidden, int, XRAY_SLOT_FLAG_HIDDEN | XRAY_SLOT_FLAG_RATE);
 	xray_add_vslot(ctest_t, "b", add_one);
 	xray_register(ctest_t, &test_inst, "/a/c", sizeof(test_inst)/sizeof(test_inst[0]), NULL);
 	xray_register(ctest_t, &test_inst, "/rate", 1, NULL);
@@ -173,9 +168,6 @@ int main() {
 	register_signal_term();
 	xray_init("04BE197BCBC14D8E", 1);
 
-//	pthread_t inc_x_thread;
-//	pthread_create(&inc_x_thread, NULL, xray_loop, NULL);
-
     register_is_up();
     register_test();
     register_basic_types();
@@ -184,6 +176,7 @@ int main() {
 
 	while(exit_test == 0) {
 		test_inst[0].rate += 10;
+		test_inst[0].rate_hidden += 10;
 		sleep(1);
 	}
 }
