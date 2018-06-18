@@ -21,7 +21,7 @@ extern "C"
 
 	#define XRAY_SLOT_FLAG_CONST 	(1 << 0)
 	#define XRAY_SLOT_FLAG_RATE  	(1 << 1)
-	#define XRAY_SLOT_FLAG_PK	(1 << 2)
+	#define XRAY_SLOT_FLAG_PK	    (1 << 2)
 	#define XRAY_SLOT_FLAG_HIDDEN	(1 << 3)
 
 	#define member_size(type, member) sizeof(((type *)0)->member)
