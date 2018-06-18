@@ -49,7 +49,7 @@ libxray-debug:
 
 
 xraycli:
-	${Q} pip install -e .
+	${Q}pip install --user .
 
 test-app: libxray-shared
 	gcc -g -O0 -L${INSTALL_DIR} -I${INSTALL_DIR} ${SYS_INC} ${SYS_LIB} ${DEBUG_SANITIZE} -o ${INSTALL_DIR}/test-app ${SRC_DIR}/test-app.c -lxray -lstdc++ -lnanomsg
