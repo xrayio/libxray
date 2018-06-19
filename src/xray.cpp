@@ -414,14 +414,14 @@ void XType::add_slot(const string &name,
 
 	slots[name] = make_shared<XSlot>(name, offset, is_pointer, false, 0, found_slot_type->second, flags);
 
-	if(flags & XRAY_FLAG_PK) {
+	if(flags & XRAY_SLOT_FLAG_PK) {
 		if(is_complex_slot(slots[name]))
 			throw invalid_argument("cannot set pk on complex slot");
 
 		pk = slots[name];
 	}
 
-	if(flags & XRAY_FLAG_RATE) {
+	if(flags & XRAY_SLOT_FLAG_RATE) {
 		capture_needed = true;
 
 		string rate_name = name + "-" + "rate";
@@ -442,6 +442,9 @@ static void xdump_slots(vector<string> &header_raw,
 						tsl::ordered_map<string, shared_ptr<VSlot>> &vslots) {
 	for(auto slot_entry : slots) {
 		shared_ptr<XSlot> slot = slot_entry.second;
+		if(slot->flags & XRAY_SLOT_FLAG_HIDDEN) {
+			continue;
+		}
 		if(is_complex_slot(slot)) {
 			xdump_slots(header_raw, slot->type->slots, slot->type->vslots);
 			continue;
@@ -518,13 +521,16 @@ bool XPathNode::format_row(vector<string> &row, void *row_ptr, capture_t *cap, s
 		shared_ptr<XSlot> slot = slot_entry.second;
 		void *slot_ptr = (uint8_t *)row_ptr + slot->offset;
 
+		if(slot->flags & XRAY_SLOT_FLAG_HIDDEN) {
+			continue;
+		}
 		if(is_complex_slot(slot)) {
 			is_empty_row &= format_row(row, slot_ptr, nullptr, slot->type);
 			continue;
 		}
 
 		string formatted = format_slot(slot, slot_ptr);
-		if(formatted != "0" and !(slot->flags & XRAY_FLAG_CONST)) {
+		if(formatted != "0" and !(slot->flags & XRAY_SLOT_FLAG_CONST)) {
 			is_empty_row = false;
 		}
 		row.push_back(formatted);
@@ -761,8 +767,8 @@ void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &
 	bool is_cap_needed = false;
 	bool is_pk_exists = false;
 	for(auto &slot_it : xtype->second->slots) {
-		is_cap_needed |= slot_it.second->flags & XRAY_FLAG_RATE;
-		is_pk_exists |= slot_it.second->flags & XRAY_FLAG_PK;
+		is_cap_needed |= slot_it.second->flags & XRAY_SLOT_FLAG_RATE;
+		is_pk_exists |= slot_it.second->flags & XRAY_SLOT_FLAG_PK;
 	}
 
 	if(is_cap_needed && !is_pk_exists)
@@ -1126,7 +1132,7 @@ int _xray_add_slot(const char *type_name,
 			throw runtime_error{"slot_type should not be null"};
 
 		auto new_type = c_xclient->get_xtype_by_name(type_name);
-		if(new_type->pk && (flags & XRAY_FLAG_PK))
+		if(new_type->pk && (flags & XRAY_SLOT_FLAG_PK))
 			throw runtime_error{"type '" + new_type->name + "' already has configured pk on slot '" + new_type->pk->name + "'"};
 		new_type->add_slot(slot_name, slot_offset, slot_size, slot_type, is_pointer, arr_size, flags);
 		return 0;
@@ -1192,7 +1198,7 @@ int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd)
         auto xtype = c_xclient->get_xtype_by_name(type_name);
 		for(auto &slot: xtype->slots) {
 			// TODO: support simple formating, needed support for more complicated
-			if(slot.second->flags & XRAY_FLAG_CONST)
+			if(slot.second->flags & XRAY_SLOT_FLAG_CONST)
 				continue;
 			int slot_offset = slot.second->offset;
 			void *slot_dst_ptr = (uint8_t *)row_dst + slot_offset;
