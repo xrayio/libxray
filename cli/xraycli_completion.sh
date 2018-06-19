@@ -10,7 +10,6 @@ _xray_cli_complete()
                 _xraycli_paths=''
                 _xray_num_services="${num_services}"
                 while read -r service; do
-                        echo getting options for ${service}
                         while read -r table; do
                                 _xraycli_paths="${_xraycli_paths} ${service}${table}"
                         done <<< "$(xraycli ${service} | tail -n +3)"
