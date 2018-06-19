@@ -98,7 +98,7 @@ register_itable()
     	};
     	xray_create_type(struct itable_example, NULL);
 	xray_add_slot(struct itable_example, a, int, 0);
-	xray_add_slot(struct itable_example, b, int, 0);
+	xray_add_slot(struct itable_example, b, int, XRAY_SLOT_FLAG_HIDDEN);
 	xray_add_slot(struct itable_example, c, int, 0);
 
     	xray_register_struct(struct itable_example, &element, "/itable");
@@ -109,8 +109,8 @@ static void
 register_test()
 {
     xray_create_type(ctest_t, NULL);
-	xray_add_slot(ctest_t, id, int, XRAY_FLAG_PK);
-	xray_add_slot(ctest_t, rate, int, XRAY_FLAG_RATE);
+	xray_add_slot(ctest_t, id, int, XRAY_SLOT_FLAG_PK);
+	xray_add_slot(ctest_t, rate, int, XRAY_SLOT_FLAG_HIDDEN | XRAY_SLOT_FLAG_RATE);
 	xray_add_vslot(ctest_t, "b", add_one);
 	xray_register(ctest_t, &test_inst, "/a/c", sizeof(test_inst)/sizeof(test_inst[0]), NULL);
 	xray_register(ctest_t, &test_inst, "/rate", 1, NULL);
