@@ -38,16 +38,36 @@ class SystemTest(unittest.TestCase):
         pass
 
     def test_sanity(self):
-        self.assertEquals(self.libxray.create_type("test_type", sizeof(test_struct)), 0)
-        self.assertEquals(self.libxray.add_slot("test_type", "a", 0, 4, "int"), 0)
-        self.assertEquals(self.libxray.add_slot("test_type", "b", 4, 4, "int"), 0)
-        self.assertEquals(self.libxray.add_slot("test_type", "c", 8, 4, "int"), 0)
-        self.assertEquals(self.libxray.register("test_type", test_array, "/test", 10), 0)
+
+        self.assertEquals(self.libxray.create_type(
+            "test_type", sizeof(test_struct)), 0)
+
+        self.assertEquals(self.libxray.add_slot(
+            "test_type", "a", 0, 4, "int"), 0)
+
+        self.assertEquals(self.libxray.add_slot(
+            "test_type", "b", 4, 4, "int"), 0)
+
+        self.assertEquals(self.libxray.add_slot(
+            "test_type", "c", 8, 4, "ui_hex_t"), 0)
+
+        self.assertEquals(self.libxray.register(
+            "test_type", test_array, "/test", 10), 0)
+
         self.assertEquals(self.libxray.dump("/test"),
-                          [[u'a', u'b', u'c'], [u'1', u'1', u'1'], [u'1', u'1', u'1'], [u'1', u'1', u'1'],
-                           [u'1', u'1', u'1'], [u'1', u'1', u'1'], [u'1', u'1', u'1'], [u'1', u'1', u'1'],
-                           [u'1', u'1', u'1'], [u'1', u'1', u'1'], [u'1', u'1', u'1']])
+                          [[u'a', u'b', u'c'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001'],
+                           [u'1', u'1', u'0x00000001']])
 
 
 if __name__ == '__main__':
     unittest.main()
+

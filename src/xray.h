@@ -29,6 +29,7 @@ extern "C"
 	/* typedefs */
 	typedef char * c_string_t;
 	typedef char ** c_p_string_t;
+	typedef unsigned int ui_hex_t;
 
 	typedef struct {
 		void *data;
