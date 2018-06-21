@@ -703,6 +703,7 @@ void XNode::register_basic_types(void) {
 
 	register_type(make_shared<XType>(&types, "c_string_t", sizeof(c_string_t), "", xray_string_fmt));
 	register_type(make_shared<XType>(&types, "c_p_string_t", sizeof(c_p_string_t), "", xray_p_string_fmt));
+	register_type(make_shared<XType>(&types, "ui_hex_t", sizeof(ui_hex_t), "0x%08x"));
 }
 
 
@@ -1244,3 +1245,4 @@ xray_handle_loop()
     }
     return 0;
 }
+
