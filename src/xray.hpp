@@ -93,6 +93,7 @@ class XClient {
 	void expire_captures();
 	void _start();
 	void get_cfg(const string &api_key);
+	void call_on_cb(string path);
 
 public:
 	thread *xclient_thread = nullptr;

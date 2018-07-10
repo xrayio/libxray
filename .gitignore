@@ -5,4 +5,8 @@ xraycli.egg-info/
 *.idea/
 .pydevproject
 *.pyc
+.vscode/
+GPATH
+GRTAGS
+GTAGS
 
