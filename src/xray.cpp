@@ -24,6 +24,7 @@
 #include "ordered_map.h"
 #include "json.hpp"
 
+#include "fixed-list.hpp"
 #include "xray.hpp"
 #include "xray.h" 		/* c api */
 
@@ -34,7 +35,7 @@ class XPathNode;
 class XType;
 class XSlot;
 
-typedef pair<vector<char>, uint32_t> capture_t;
+typedef pair<vector<char>, uint32_t> capture_sample_t;
 
 /**
  * Static functions, HELPERS
@@ -42,7 +43,6 @@ typedef pair<vector<char>, uint32_t> capture_t;
 
 #define BREAKPOINT	__asm__("int $3")
 
-#define EXPIRE_CAPTURE_CHECK_SEC (60)
 #define EXPIRE_CAPTURE_SEC  	 (4)
 
 #define XRAY_MAX_ROWS_SHOW (100)
@@ -50,7 +50,6 @@ typedef pair<vector<char>, uint32_t> capture_t;
 /**
  * EXECPTIONS
  */
-
 class cluster_not_exists_err: public std::exception
 {
 	const char* what() const throw() { return "Cluster not exists\n"; }
@@ -460,42 +459,85 @@ static void xdump_slots(vector<string> &header_raw,
  * XPathNode
  */
 class XPathNode {
+
+	struct onoff_rs {
+		on_cb_t on_cb = 0;
+		off_cb_t off_cb = 0;
+		void *data = nullptr;
+		bool is_enabled = false;
+		bool is_onoff_needed = false;
+		uint32_t last_rs_ts = 0;
+		CircBuf<vector<char>> *byte_rs=nullptr;
+		uint32_t next_insert_byte_rs = 0;
+
+		~onoff_rs() {
+			if(byte_rs) {
+				delete byte_rs;
+				byte_rs = nullptr;
+			}
+
+		}
+	};
+
+	struct capture {
+		uint32_t last_capture_ts = 0;
+
+		/* rate calculation */
+		unordered_map<string, capture_sample_t> captures;
+	};
+
+		XNode *xnode;
 	public:
 		void *xobj = nullptr;
 		tsl::ordered_map <string, shared_ptr<XPathNode>> sons;
 		shared_ptr<XType> xtype = nullptr;
-		XNode *xnode;
 		weak_ptr<XPathNode> self;
 		weak_ptr<XPathNode> father_node;
 		string name;
-
-		uint32_t last_capture_ts = 0;
 
 		/* user config */
 		xray_iterator iterator_cb = nullptr;
 		int n_rows = 0;
 
 		XPathNode(const string &xpath_str, XNode *xnode=nullptr);
-
 		vector<string> dump_son_names();
 		shared_ptr<ResultSet> xdump();
 		void xdump_dirs(shared_ptr<ResultSet> &rs, const string path="/");
 		void clear_captures();
+		void call_off_rs();
+
+		struct onoff_rs onoff_rs;
+		struct capture capture;
 
 	private:
-		/* rate calculation */
-		unordered_map<string, capture_t> captures;
 
 		XPathNode& parse_path_str(const string &xpath_str);
 		void xdump_xobj(shared_ptr<ResultSet> &rs);
-		bool format_row(vector<string> &row, void *row_ptr, capture_t *capture, shared_ptr<XType> xtype);
+		bool format_row(vector<string> &row, void *row_ptr, capture_sample_t *capture, shared_ptr<XType> xtype);
 		string format_slot(shared_ptr<XSlot> &slot, void *slot_ptr);
 		void handle_row(shared_ptr<ResultSet> &rs, void *row_ptr);
+
+		void call_on_rs();
+		void set_expire();
 };
 
+void XPathNode::call_on_rs() {
+	if(onoff_rs.on_cb) {
+		onoff_rs.on_cb(onoff_rs.data);
+		onoff_rs.is_enabled = true;
+	}
+}
+
+void XPathNode::call_off_rs() {
+	if(onoff_rs.off_cb) {
+		onoff_rs.off_cb(onoff_rs.data);
+		onoff_rs.is_enabled = false;
+	}
+}
+
 void XPathNode::clear_captures() {
-	last_capture_ts = 0;
-	captures.clear();
+	capture.last_capture_ts = 0;
+	capture.captures.clear();
 }
 
 string XPathNode::format_slot(shared_ptr<XSlot> &slot, void *slot_ptr) {
@@ -514,7 +556,7 @@ string XPathNode::format_slot(shared_ptr<XSlot> &slot, void *slot_ptr) {
 	return move(formatted);
 }
 
-bool XPathNode::format_row(vector<string> &row, void *row_ptr, capture_t *cap, shared_ptr<XType> xtype) {
+bool XPathNode::format_row(vector<string> &row, void *row_ptr, capture_sample_t *cap, shared_ptr<XType> xtype) {
 	bool is_empty_row = true;
 
 	for(auto &slot_entry: xtype->slots) {
@@ -560,13 +602,12 @@ bool XPathNode::format_row(vector<string> &row, void *row_ptr, capture_t *cap, s
 
 void XPathNode::handle_row(shared_ptr<ResultSet> &rs, void *row_ptr) {
 	auto row = vector<string>{};
-	capture_t *cap = nullptr;
-	string pk;
+	capture_sample_t *cap = nullptr;
 
 	if(xtype->capture_needed) {
 		void *slot_ptr = (char *)row_ptr + xtype->pk->offset;
 		string pk = format_slot(xtype->pk, slot_ptr);
-		cap = &captures[pk];
+		cap = &capture.captures[pk];
 		if(cap->second == 0) {
 			cap->first.resize(xtype->size);
 			memcpy(cap->first.data(), row_ptr, xtype->size);
@@ -584,15 +625,28 @@ void XPathNode::handle_row(shared_ptr<ResultSet> &rs, void *row_ptr) {
 
 }
 
+void XPathNode::set_expire()
+{
+	if(capture.last_capture_ts == 0) {
+		xnode->expire_pnodes.push_back(self);
+	}
+	uint32_t ts = get_current_timestamp();
+	capture.last_capture_ts = ts;
+	onoff_rs.last_rs_ts = ts;
+}
+
 void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 {
 	int actual_rows = min(n_rows, XRAY_MAX_ROWS_SHOW);
 
-	if(xtype->capture_needed) {
-		if(last_capture_ts == 0) {
-			xnode->expire_pnodes.push_back(self);
+	if(onoff_rs.is_onoff_needed) {
+		if(onoff_rs.is_enabled == false) {
+			call_on_rs();
 		}
-		last_capture_ts = get_current_timestamp();
+	}
+
+	if(xtype->capture_needed || onoff_rs.is_enabled) {
+		set_expire();
 	}
 
 	if(iterator_cb) {
@@ -609,6 +663,7 @@ void XPathNode::xdump_xobj(shared_ptr<ResultSet> &rs)
 		}
 	}
 
+	/* handle array */
 	int row_offset = 0;
 	for(auto idx : range(0, actual_rows)) {
 		void *row_ptr = (uint8_t *)xobj + row_offset;
@@ -758,12 +813,12 @@ void XNode::xdelete(const string &xpath_str) {
 
 void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &xtype_str, xray_iterator iterator_cb) {
 	auto xtype = types.find(xtype_str);
-	if(xobj == nullptr)
-		throw invalid_argument("cannot add xobj, xobj must not be null");
-	if(n_rows && iterator_cb)
-		throw invalid_argument("cannot set both n_rows and iterator_cb, use one of them");
+
 	if(xtype == types.end())
 		throw invalid_argument("cannot add xobj, type not exists:'" + xtype_str + "'");
+
+	if(n_rows && iterator_cb)
+		throw invalid_argument("cannot set both n_rows and iterator_cb, use one of them");
 
 	bool is_cap_needed = false;
 	bool is_pk_exists = false;
@@ -776,6 +831,12 @@ void XNode::xadd(void *xobj, int n_rows, const string &xpath_str, const string &
 		throw invalid_argument("cannot add xobj, type '" + xtype_str + "' has rate enabled but no PK");
 
 	auto pnode = find_path_node(xpath_str, true);
+
+	/* push table */
+	if(xobj == nullptr) {
+		pnode->onoff_rs.byte_rs = new CircBuf<vector<char>>(XRAY_MAX_ROWS_SHOW, xtype->second->size);
+		xobj = pnode->onoff_rs.byte_rs;
+	}
 
 	pnode->xobj = xobj;
 	pnode->xtype = xtype->second;
@@ -861,12 +922,14 @@ void XClient::destroy_socket() {
 }
 
 void XClient::init_socket() {
+	int timeout = 1000;
 	destroy_socket();
 
 	if(xray_cli_socket == nullptr) {
 		cout << "Binding to: " << xray_cli_conn << " ..." << endl;
 		xray_cli_socket = new nn::socket(AF_SP, NN_REP);
 		xray_cli_socket->bind(xray_cli_conn.c_str());
+		xray_cli_socket->setsockopt(NN_SOL_SOCKET, NN_RCVTIMEO, (const void *)&timeout, sizeof(timeout));
 	}
 
 	should_init_socket = false;
@@ -992,16 +1055,30 @@ shared_ptr<ResultSet> XClient::handle_query(const string &query) {
 }
 
 void XClient::expire_captures() {
-	if(timestamp_diff_in_sec(time, expire_ts) < EXPIRE_CAPTURE_CHECK_SEC)
+	if(timestamp_diff_in_sec(time, expire_ts) < EXPIRE_CAPTURE_SEC)
 		return;
 
 	for(auto it = xnode.expire_pnodes.begin(); it != xnode.expire_pnodes.end();) {
 		if(auto pnode = it->lock()) {
-			if(timestamp_diff_in_sec(time, pnode->last_capture_ts) > EXPIRE_CAPTURE_SEC)
+			/* `path node` cannot be both `capture` and `onoff` */
+			if(pnode->xtype->capture_needed)
 			{
-				pnode->clear_captures();
-				it = xnode.expire_pnodes.erase(it);
-				continue; /* don't increment iterator , elemnt was deleted */
+				if(timestamp_diff_in_sec(time, pnode->capture.last_capture_ts) > EXPIRE_CAPTURE_SEC)
+				{
+					pnode->clear_captures();
+					it = xnode.expire_pnodes.erase(it);
+					continue; /* don't increment iterator , elemnt was deleted */
+				}
+			}
+
+			if(pnode->onoff_rs.is_enabled)
+			{
+				if(timestamp_diff_in_sec(time, pnode->onoff_rs.last_rs_ts) > EXPIRE_CAPTURE_SEC)
+				{
+					pnode->call_off_rs();
+					it = xnode.expire_pnodes.erase(it);
+					continue; /* don't increment iterator , elemnt was deleted */
+				}
 			}
 
 		}
@@ -1054,6 +1131,8 @@ void XClient::handle_rxloop()
 			cout << "Rx timeout, reconnecting" << endl;
 			cont_rx = false;
 			should_init_socket = true;
+		} catch (const nn::exception &e) {
+			// rx timeout 
 		} catch (const exception &e) {
 			cout << "Unknown error: " << e.what() << endl;
 			cont_rx = false;
@@ -1238,11 +1317,61 @@ int
 xray_handle_loop()
 {
 	try {
+		xray_is_initiated();
 		c_xclient->handle_rxloop();
+	    return 0;
 	} catch(exception &ex) {
         cout << "ERROR: xray handle. resaon: "<< ex.what() << endl;
-        return -1;
     }
-    return 0;
+	return -1;
 }
 
+int
+xray_set_cb(const char *path, on_cb_t on_cb, on_cb_t off_cb, void *data)
+{
+	try {
+		xray_is_initiated();
+		lock_guard<mutex> lock(c_xclient->back_end_lock);
+		string path_string = path;
+		shared_ptr<XPathNode> xpathnode = c_xclient->xnode.find_path_node(path_string, false);
+		xpathnode->onoff_rs.off_cb = off_cb;
+		xpathnode->onoff_rs.data = data;
+		xpathnode->onoff_rs.on_cb = on_cb;
+		xpathnode->onoff_rs.is_onoff_needed = true;
+		return 0;
+	} catch(exception &ex) {
+		cout << "ERROR: xray_dump. resaon: "<< ex.what() << endl;
+	}
+	return -1;
+}
+
+struct push_it {
+	uint32_t state;
+};
+
+void *
+_xray_push_iterator(void *container, uint8_t *state, void *mem) {
+	auto byte_rs = static_cast<CircBuf<vector<char>> *>(container);
+	struct push_it *it_state = (struct push_it *)state;
+
+	int len = byte_rs->len();
+	if(len == 0 || len <= it_state->state)
+		return nullptr;
+
+	it_state->state++;
+	void *row = &(*(*byte_rs)[it_state->state - 1])[0];
+	return row;
+}
+
+int _xray_push(const char *path, void *row) {
+	try {
+		string path_string = path;
+		shared_ptr<XPathNode> xpathnode = c_xclient->xnode.find_path_node(path_string, false);
+		xpathnode->onoff_rs.byte_rs->add(row);
+		return 0;
+	} catch(exception &ex) {
+		cout << "ERROR: xray_push. resaon: " << ex.what() << endl;
+
+	}
+	return -1;
+}

@@ -20,6 +20,10 @@ class XrayBind:
                               c_void_p  # mem
                               )
 
+    onoff_func = CFUNCTYPE(None, 
+                           c_void_p  # data
+                           )
+
     def __init__(self):
         self.libxray = CDLL(self.shared_path, mode=1)
 
@@ -67,10 +71,25 @@ class XrayBind:
             POINTER(c_char_p)  # out string
         )
 
-
+        self.fn__xray_push = self.libxray._xray_push
+        self.fn__xray_push.restype = c_int
+        self.fn__xray_push.argstype = (
+            c_char_p,  # path
+            c_void_p  # row
+        )
+        
+        self.fn_xray_set_cb = self.libxray.xray_set_cb
+        self.fn_xray_set_cb.restype = c_int
+        self.fn_xray_set_cb.argstype = (
+            c_char_p,  # path
+            c_void_p,  # on cb
+            c_void_p,  # off cb
+            c_void_p,  # data
+        )
 # Test
 class Xray:
     bind = XrayBind()
+    cbs = dict()  # to hold refernce to python objects that passed to 'c'
 
     def init(self, api_key):
         api_key = c_char_p(api_key)
@@ -102,6 +121,20 @@ class Xray:
         path = c_char_p(path)
         n_rows = c_int(n_rows)
         return self.bind.fn__xray_register(type_name, ptr_obj, path, n_rows, iterator_cb)
+
+    def register_push(self, type_name, path):
+        return self.register(type_name, None, path, 0, self.bind.libxray._xray_push_iterator)
+
+    def push(self, path, row):
+        return self.bind.fn__xray_push(path, byref(row))
+
+    def xray_set_cb(self, path_str, on_cb, off_cb, data):
+        path = c_char_p(path_str)
+        on_cb = self.bind.onoff_func(on_cb)
+        off_cb = self.bind.onoff_func(off_cb)
+        data = c_int(data)
+        self.cbs[path_str] = (path, on_cb, off_cb, data)
+        return self.bind.fn_xray_set_cb(path, on_cb, off_cb, byref(data))
 
     def dump(self, path):
         path = c_char_p(path)
