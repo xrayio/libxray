@@ -1,6 +1,8 @@
 #ifndef FIXED_LIST_HPP_
 #define FIXED_LIST_HPP_
 
+#include <atomic>
+
 template <typename T>
 class CircBuf
 {
@@ -11,13 +13,13 @@ class CircBuf
 	const int elm_len;
 	T *data;
 	int front;
-	int count;
+	std::atomic<int> count;
 
   public:
 	CircBuf(int, int);
 	~CircBuf();
 	void add(void *row);
-	int len() { return count < size ? count : size; }
+	int len() { return count < size ? count + 1 : size; }
 	T *operator[](int in_index);
 };
 
@@ -31,7 +33,7 @@ CircBuf<T>::CircBuf(int sz, int len) : size(sz), elm_len(len)
 	for(i=0; i< sz; i++) {
 		data[i].resize(elm_len);
 	}
-	count = 0;
+	count = -1;
 }
 
 template <typename T>
@@ -40,14 +42,14 @@ CircBuf<T>::~CircBuf()
 	delete data;
 }
 
-// returns true if add was successful, false if the buffer is already full
+// Thread safe
 template <typename T>
 void CircBuf<T>::add(void *row)
 {
 	// find index where insert will occur
+	count++;
 	int end = count % size;
 	memcpy(&data[end][0], row, elm_len);
-	count++;
 }
 
 template <typename T>
@@ -58,10 +60,10 @@ T* CircBuf<T>::operator[](int in_index)
     {
         throw std::out_of_range("out of range");
     }
-    if(count < size) 
+    if((count + 1) < size) 
         front = 0;
     else 
-        front = count % size;
+        front = (count + 1) % size;
     
 	in_index = (in_index + front) % size;
 
