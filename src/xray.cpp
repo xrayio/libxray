@@ -1151,6 +1151,16 @@ void XClient::start() {
 	xclient_thread = new thread([this] { this->_start(); });
 }
 
+int XClient::get_rcv_event_sock() {
+       if(xray_cli_socket == nullptr)
+       {
+               return -1;
+       }
+       size_t sz = sizeof(xray_event_sock);
+       xray_cli_socket->getsockopt(NN_SOL_SOCKET, NN_RCVFD, &xray_event_sock, &sz);
+       return xray_event_sock;
+}
+
 /***
  * C API
  */
@@ -1312,6 +1322,20 @@ int xray_dump(const char *path, char **out_str)
     }
     return -1;
 }
+
+int
+xray_get_rcv_event_sock(int *rx_sockets, int *n_sockets)
+{
+       int rcv_sock = c_xclient->get_rcv_event_sock();
+       if(rcv_sock > 0)
+       {
+               *rx_sockets = rcv_sock;
+	       *n_sockets = 1;
+               return 0;
+       }
+       return -1;
+}
+
 
 int
 xray_handle_loop()
