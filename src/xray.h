@@ -30,6 +30,7 @@ extern "C"
 	typedef char * c_string_t;
 	typedef char ** c_p_string_t;
 	typedef unsigned int ui_hex_t;
+	typedef unsigned short us_hex_t;
 
 	typedef struct {
 		void *data;
@@ -89,7 +90,7 @@ extern "C"
 		_xray_add_vslot(#container, slot_name, slot_fmt_cb)
 
 	#define xray_push(container, row) \
-		_xray_push(#container, row)
+		_xray_push(container, row)
 
 #ifdef __cplusplus
 }
