@@ -759,6 +759,7 @@ void XNode::register_basic_types(void) {
 	register_type(make_shared<XType>(&types, "c_string_t", sizeof(c_string_t), "", xray_string_fmt));
 	register_type(make_shared<XType>(&types, "c_p_string_t", sizeof(c_p_string_t), "", xray_p_string_fmt));
 	register_type(make_shared<XType>(&types, "ui_hex_t", sizeof(ui_hex_t), "0x%08x"));
+	register_type(make_shared<XType>(&types, "us_hex_t", sizeof(us_hex_t), "0x%04x"));
 }
 
 
@@ -1196,7 +1197,8 @@ int _xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type
 
 int _xray_add_slot(const char *type_name,
 				   const char *slot_name,
-				   int slot_offset, int slot_size,
+				   int slot_offset, 
+				   int slot_size,
 				   const char *slot_type,
 				   int is_pointer,
 				   int arr_size,
@@ -1217,7 +1219,7 @@ int _xray_add_slot(const char *type_name,
 		new_type->add_slot(slot_name, slot_offset, slot_size, slot_type, is_pointer, arr_size, flags);
 		return 0;
 	} catch(exception &ex) {
-		cout << "ERROR: add_slot. reason: " << ex.what() << endl;
+		cout << "ERROR: add_slot. slot_name:'" << string(slot_name) << "' slot_type:'" << string(type_name) << "'. reason: " << ex.what() << endl;
 	}
 	return -1;
 }
