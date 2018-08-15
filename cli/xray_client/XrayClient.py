@@ -5,6 +5,7 @@ import warnings
 warnings.simplefilter("ignore")
 import nanomsg
 import json
+import functools
 
 class MsgToXnode(object):
     REQ_ID = 0
@@ -37,7 +38,37 @@ class XrayClient(object):
     
     def close_socket(self):
         self.request.close()
-    
+
+    def get_xray_stats(func):
+        @functools.wraps(func)
+        def wrapper(self, query_path, *args, **kwargs):
+            fmt = args[0] if args else None
+            result_set = func(self, query_path, fmt)
+
+            # in case of fmt is json need only to arrange the result set list of lists
+            header = result_set["result_set"][0] if fmt else result_set[0]
+            res_set = result_set["result_set"][1:] if fmt else result_set[1:]
+            result = list()
+            for entry in res_set:
+                row = dict()
+                for index, col in enumerate(header):
+                    row[col] = entry[index]
+
+                if kwargs:
+                    for key in kwargs:
+                        if row[key] == kwargs[key]:
+                            result.append(row)
+                else:
+                    result.append(row)
+            if fmt:
+                result_set["result_set"] = result
+                return result_set
+            else:
+                return result
+
+        return wrapper
+
+    @get_xray_stats
     def send_recv(self, path, fmt):
         if self.intiated is False:
             self.init_socket()
@@ -56,3 +87,4 @@ class XrayClient(object):
             return msg
         else:
             return msg["result_set"]
+
