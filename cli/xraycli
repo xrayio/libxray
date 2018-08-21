@@ -18,16 +18,15 @@ class NoNodesError(Exception):
 
 
 def humanize_number(value, fraction_point=1):
-    powers = [10 ** x for x in (12, 9, 6, 3, 0)]
+    # [10^12, 10^9, 10^6, 10^3, 10^0)]
+    powers = (1000000000000.0, 1000000000.0, 1000000.0, 1000.0, 1.0)
     human_powers = ('T', 'B', 'M', 'K', '')
     is_negative = False
     return_value = 0
 
-    if not isinstance(value, float):
-        value = float(value)
-    if value < 0:
+    if value < 0.0:
         is_negative = True
-        value = abs(value)
+        value *= -1
     for i, p in enumerate(powers):
         if value >= p:
             return_value = str(round(value / (p / (10.0 ** fraction_point))) /
@@ -50,8 +49,7 @@ class XrayCli(object):
         try:
             nodes = os.listdir(self.XRAY_NODES_PATH)
             nodes = [[node] for node in nodes]
-            nodes.insert(0, ["nodes"])
-            return nodes
+            return [["nodes"]] + nodes
         except OSError:
             return [["NODE"], []]
 
@@ -68,7 +66,7 @@ class XrayCli(object):
         return self.nodes[node_name].send_recv(node_xpath, fmt)
 
     def humanize_column(self, column):
-        return [humanize_number(int(value)) for value in column]
+        return [humanize_number(float(value)) for value in column]
 
     def huminify_rates(self, df):
         columns = df.columns
