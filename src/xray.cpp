@@ -756,6 +756,8 @@ void XNode::register_basic_types(void) {
 	register_type(make_shared<XType>(&types, "unsigned long long", sizeof(long long), "%llu"));
 	register_type(make_shared<XType>(&types, "unsigned long long int", sizeof(long long int), "%llu"));
 
+	register_type(make_shared<XType>(&types, "size_t", sizeof(size_t), "%zu"));
+
 	register_type(make_shared<XType>(&types, "c_string_t", sizeof(c_string_t), "", xray_string_fmt));
 	register_type(make_shared<XType>(&types, "c_p_string_t", sizeof(c_p_string_t), "", xray_p_string_fmt));
 	register_type(make_shared<XType>(&types, "ui_hex_t", sizeof(ui_hex_t), "0x%08x"));
@@ -1220,6 +1222,7 @@ int _xray_add_slot(const char *type_name,
 		return 0;
 	} catch(exception &ex) {
 		cout << "ERROR: add_slot. slot_name:'" << string(slot_name) << "' slot_type:'" << string(type_name) << "'. reason: " << ex.what() << endl;
+		exit(-1);
 	}
 	return -1;
 }
@@ -1238,6 +1241,7 @@ int _xray_add_vslot(const char *type_name, const char *vslot_name, xray_vslot_fm
 		return 0;
 	} catch(exception &ex) {
 		cout << "ERROR: add_vslot. reason: " << ex.what() << endl;
+		exit(-1);
 	}
 	return -1;
 }

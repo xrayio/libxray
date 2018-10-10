@@ -86,6 +86,9 @@ extern "C"
 	#define xray_add_slot(container, slot, slot_type, flags) \
 		_xray_add_slot(#container, #slot, offsetof(container, slot), member_size(container, slot), #slot_type, 0, 0, flags)
 
+	#define xray_add_slot_short_name(container, slot, slot_short_name, slot_type, flags) \
+		_xray_add_slot(#container, slot_short_name, offsetof(container, slot), member_size(container, slot), #slot_type, 0, 0, flags)
+
     #define xray_add_vslot(container, slot_name, slot_fmt_cb) \
 		_xray_add_vslot(#container, slot_name, slot_fmt_cb)
 
