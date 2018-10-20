@@ -234,6 +234,7 @@ static string create_node_id(const string &hostname, const string &nodename,
 
 #define HELLO_MSG_PREFIX "xnode-ok-"
 
+/* This is set by glibc to get the program name of the current binary. */
 extern char *__progname;
 
 static void set_if_exists(unordered_map<string, string> &map, const string &value, json &cfg, const string &def)
@@ -874,6 +875,7 @@ void XClient::get_cfg(const string &api_key) {
 	set_if_exists(cfg, "api_key", env_json, api_key);
 	set_if_exists(cfg, "hostname", env_json, hostname);
 	set_if_exists(cfg, "debug", env_json, "false");
+	set_if_exists(cfg, "progname", env_json, __progname);
 
 	json effective_json(cfg);
 
@@ -893,11 +895,11 @@ shared_ptr<XType> XClient::get_xtype_by_name(const char *type_name) {
 
 XClient::XClient(const string &api_key) {
 	get_cfg(api_key);
-	node_id = create_node_id(cfg["hostname"], __progname, cfg["hostname"], cfg["api_key"]);
+	node_id = create_node_id(cfg["hostname"], cfg["progname"], cfg["hostname"], cfg["api_key"]);
 	xray_server_conn = "tcp://" + cfg["server"] + ":" + cfg["port"];
 
 	try {
-		xray_cli_conn = "ipc:///tmp/xray/" + string(__progname);
+		xray_cli_conn = "ipc:///tmp/xray/" + cfg["progname"];
 		xray_mkdir("/tmp/xray/");
 	} catch(cannot_create_path_err &ex) {
 		cout << "Cannot create mount point" << endl;
@@ -1133,7 +1135,7 @@ void XClient::handle_rxloop()
 			cont_rx = false;
 			should_init_socket = true;
 		} catch (const nn::exception &e) {
-			// rx timeout 
+			// rx timeout
 		} catch (const exception &e) {
 			cout << "Unknown error: " << e.what() << endl;
 			cont_rx = false;
@@ -1197,7 +1199,7 @@ int _xray_create_type(const char *type_name, int size, xray_fmt_type_cb fmt_type
 
 int _xray_add_slot(const char *type_name,
 				   const char *slot_name,
-				   int slot_offset, 
+				   int slot_offset,
 				   int slot_size,
 				   const char *slot_type,
 				   int is_pointer,
