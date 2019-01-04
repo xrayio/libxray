@@ -54,6 +54,7 @@ class XClient {
 		}
 	};
 
+	int xray_event_sock;
 	nn::socket *xray_cli_socket = nullptr;
 
 	string node_id;
@@ -113,6 +114,7 @@ public:
 	shared_ptr<ResultSet> handle_query(const string &query);
 	shared_ptr<XType> get_xtype_by_name(const char *type_name);
 	void start();
+	int  get_rcv_event_sock();
 	void handle_rxloop();
 };
 

@@ -757,6 +757,8 @@ void XNode::register_basic_types(void) {
 	register_type(make_shared<XType>(&types, "unsigned long long", sizeof(long long), "%llu"));
 	register_type(make_shared<XType>(&types, "unsigned long long int", sizeof(long long int), "%llu"));
 
+	register_type(make_shared<XType>(&types, "size_t", sizeof(size_t), "%zu"));
+
 	register_type(make_shared<XType>(&types, "c_string_t", sizeof(c_string_t), "", xray_string_fmt));
 	register_type(make_shared<XType>(&types, "c_p_string_t", sizeof(c_p_string_t), "", xray_p_string_fmt));
 	register_type(make_shared<XType>(&types, "ui_hex_t", sizeof(ui_hex_t), "0x%08x"));
@@ -1050,9 +1052,9 @@ shared_ptr<ResultSet> XClient::handle_query(const string &query) {
 	try {
 		return xnode.xdump(query);
 	} catch (const xpath_not_exists_err &e){
-		cout << "xpath_not_exists_err" << endl;
+		cout << "xpath_not_exists_err for " << query << endl;
 		auto rs = make_shared<ResultSet>();
-		rs->push_back(vector<string>{"xquery-invlalid"});
+		rs->push_back(vector<string>{"xquery-invalid"});
 		return rs;
 	}
 }
@@ -1152,6 +1154,16 @@ void XClient::_start() {
 
 void XClient::start() {
 	xclient_thread = new thread([this] { this->_start(); });
+}
+
+int XClient::get_rcv_event_sock() {
+	if(xray_cli_socket == nullptr)
+	{
+		return -1;
+	}
+	size_t sz = sizeof(xray_event_sock);
+	xray_cli_socket->getsockopt(NN_SOL_SOCKET, NN_RCVFD, &xray_event_sock, &sz);
+	return xray_event_sock;
 }
 
 /***
@@ -1315,6 +1327,19 @@ int xray_dump(const char *path, char **out_str)
         cout << "ERROR: xray_dump. resaon: "<< ex.what() << endl;
     }
     return -1;
+}
+
+int
+xray_get_rcv_event_sock(int *rx_sockets, int *n_sockets)
+{
+	int rcv_sock = c_xclient->get_rcv_event_sock();
+	if(rcv_sock > 0)
+	{
+		*rx_sockets = rcv_sock;
+		*n_sockets = 1;
+		return 0;
+	}
+	return -1;
 }
 
 int

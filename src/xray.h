@@ -18,10 +18,11 @@ extern "C"
 	/* defines */
 	#define XRAY_MAX_SLOT_STR_SIZE 	(64)
 	#define XRAY_STATE_MAX_SIZE 	(32)
+	#define XRAY_MAX_RX_SOCKETS     (4)
 
 	#define XRAY_SLOT_FLAG_CONST 	(1 << 0)
 	#define XRAY_SLOT_FLAG_RATE  	(1 << 1)
-	#define XRAY_SLOT_FLAG_PK	    (1 << 2)
+	#define XRAY_SLOT_FLAG_PK	(1 << 2)
 	#define XRAY_SLOT_FLAG_HIDDEN	(1 << 3)
 
 	#define member_size(type, member) sizeof(((type *)0)->member)
@@ -58,6 +59,8 @@ extern "C"
 	int xray_set_cb(const char *path, on_cb_t on_cb, on_cb_t off_cb, void *data);
 
 
+	int xray_get_rcv_event_sock(int *rx_sockets, int *n_sockets);
+
 	/* UTILS */
 	/* Adding two rows of same type */
 	int _xray_add_bytype(const char *type_name, void *row_dst, void *row_toadd);
@@ -86,7 +89,10 @@ extern "C"
 	#define xray_add_slot(container, slot, slot_type, flags) \
 		_xray_add_slot(#container, #slot, offsetof(container, slot), member_size(container, slot), #slot_type, 0, 0, flags)
 
-    #define xray_add_vslot(container, slot_name, slot_fmt_cb) \
+	#define xray_add_slot_short_name(container, slot, slot_short_name, slot_type, flags) \
+		_xray_add_slot(#container, slot_short_name, offsetof(container, slot), member_size(container, slot), #slot_type, 0, 0, flags)
+
+    	#define xray_add_vslot(container, slot_name, slot_fmt_cb) \
 		_xray_add_vslot(#container, slot_name, slot_fmt_cb)
 
 	#define xray_push(container, row) \
